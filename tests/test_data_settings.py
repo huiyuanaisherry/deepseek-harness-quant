@@ -299,18 +299,18 @@ class DataSettingsTests(unittest.TestCase):
 
     def test_fetcher_rebuilds_sdk_after_config_changes(self):
         from data import fetcher_tushare as fetcher
-        import types
-        fake = types.SimpleNamespace(pro_api=lambda token: types.SimpleNamespace(token=token))
         self.addCleanup(setattr, fetcher, '_PRO', None)
-        with patch.dict('sys.modules', {'tushare': fake}), patch.object(fetcher, '_load_cfg') as cfg:
+        with patch.object(fetcher, '_load_cfg') as cfg:
             cfg.return_value = {'tushare_token': 'first', 'tushare_api_url': 'https://first.example'}
             first = fetcher._pro()
             self.assertIs(first, fetcher._pro())
             cfg.return_value = {'tushare_token': 'second', 'tushare_api_url': 'https://second.example'}
             second = fetcher._pro()
             self.assertIsNot(first, second)
-            self.assertEqual('second', second.token)
-            self.assertEqual('https://second.example', second._DataApi__http_url)
+            self.assertEqual('second', second._token)
+            self.assertEqual('https://second.example', second._endpoint)
+            cfg.return_value['tushare_allow_insecure_http'] = True
+            self.assertIsNot(second, fetcher._pro())
 
     def test_fetcher_parses_config_only_when_file_changes(self):
         from data import fetcher_tushare as fetcher

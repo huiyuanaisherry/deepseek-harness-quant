@@ -61,3 +61,6 @@ docs/发布清单_v1.0.9.md
 .superpowers/
 **/.quant-web-token
 **/.quant-web-token.*
+
+# Private bounded real market validation artifacts
+data/real-smoke/
