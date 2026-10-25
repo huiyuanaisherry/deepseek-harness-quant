@@ -174,3 +174,21 @@ class MutationTests(unittest.TestCase):
         for malformed in ({'ok':True}, {'ok':True,'defaultModel':{},'revision':3}, {'ok':False,'error':'FAKE_SECRET'}):
             with patch.object(client, 'request', return_value=malformed), self.assertRaises(SettingsError):
                 client('quant.defaults.describe', {})
+
+
+class SessionCreationTests(unittest.TestCase):
+    def test_native_creation_is_fixed_empty_payload_and_projects_id_only(self):
+        from deck.model_settings import create_chat_session
+        calls=[]
+        def rpc(method,payload):
+            calls.append((method,payload))
+            return {'sessionId':'session-test','apiKey':'PRIVATE'}
+        self.assertEqual(create_chat_session({}, rpc), {'ok':True,'sessionId':'session-test'})
+        self.assertEqual(calls,[('session.create',{})])
+        for payload in ({'cwd':'/private'},{'agentPreset':'override'},None,[]):
+            with self.assertRaises(SettingsError):
+                create_chat_session(payload,rpc)
+        self.assertEqual(len(calls),1)
+        for response in ({}, {'sessionId':''}, {'sessionId':['PRIVATE']}):
+            with self.assertRaises(SettingsError):
+                create_chat_session({},lambda *args:response)

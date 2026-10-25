@@ -47,6 +47,15 @@ class HandlerTests(unittest.TestCase):
         status, _, cookie = self.request('/api/auth/login', {'token':self.server.security.token})
         self.assertEqual(status, 200)
         self.cookie = cookie.split(';')[0]
+    def test_session_creation_requires_login_origin_and_fixed_facade(self):
+        with patch.object(deck_server, 'create_chat_session', return_value={'ok':True,'sessionId':'new'}) as create:
+            self.assertEqual(self.request('/api/chat/session', {})[0],401)
+            self.login()
+            self.assertEqual(self.request('/api/chat/session', {},origin=False)[0],403)
+            create.assert_not_called()
+            self.assertEqual(self.request('/api/chat/session', {})[0],200)
+            create.assert_called_once_with({})
+
     def test_real_handler_containment_after_login(self):
         self.login()
         for path in ['/dl//' + str(self.secret), '/v2//' + str(self.secret), '/dl/../private', '/dl/%2e%2e/private', '/dl/link', '/v2/%2f' + str(self.secret)]:

@@ -253,6 +253,16 @@ class ModelSettings:
         return {'ok':True,'defaultRevision':result.get('revision')}
 
 
+def create_chat_session(body, rpc=None):
+    """Create an idle native session with server defaults; no client runtime options."""
+    if not isinstance(body, dict) or body:
+        raise SettingsError('INVALID_REQUEST', 400)
+    result = (rpc or DSHClient())('session.create', {})
+    if not isinstance(result, dict) or not text(result.get('sessionId')):
+        raise SettingsError()
+    return {'ok':True, 'sessionId':result['sessionId']}
+
+
 def proxy_quant(target, method, body=None, client=None):
     """Only the installed quant bridge's known routes; never host API RPCs."""
     from urllib.parse import parse_qs, urlencode

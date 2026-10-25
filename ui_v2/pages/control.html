@@ -140,7 +140,7 @@
     </div>
     <div class="hz-chat-native">
       <div class="hz-sess-panel">
-        <div class="hz-sess-head"><span>会话</span></div>
+        <div class="hz-sess-head"><span>会话</span><button id="hz-new-session" class="hz-open-gui" type="button">新建会话</button></div>
         <input id="hz-sess-filter" class="hz-sess-filter" placeholder="筛选会话（标题/内容）…">
         <div class="hz-bulk-bar">
 
@@ -255,7 +255,7 @@
   }
   function hzGet(path, timeoutMs) {
     return hzFetch(path, timeoutMs || 8000).then(function (d) {
-      if (connState !== 'ok') setConn('ok', '已连接');
+      setConn('ok', '已连接');
       retryDelay = 1000;
       return d;
     }).catch(function (e) {
@@ -298,6 +298,7 @@
   /* ---------- 自绘聊天 ---------- */
   var curTarget = null;       // { kind:'root', id, title } | { kind:'niu', persona, name }
   var busy = false;
+  var creatingSession = false;
   var lastCount = 0;
   var rootsCache = [];
   var niuCache = [];
@@ -349,7 +350,6 @@
   function relatedRoots() {
     return rootsCache.filter(function (s) {
       if (KEEP_EXCLUDE_TITLES.indexOf(s.title) >= 0) return false;
-      if (!s.preview && !s.role) return false;
       if (sessKw) {
         var hay = ((s.title || '') + ' ' + (s.preview || '')).toLowerCase();
         if (hay.indexOf(sessKw.toLowerCase()) < 0) return false;
@@ -491,6 +491,7 @@
       }
       renderSessList();
       document.getElementById('hz-chat-session').textContent = curLabel();
+      if (!curTarget) document.getElementById('hz-msgs').innerHTML = '<div class="hz-msg sys">还没有主会话，请点击「新建会话」开始。</div>';
       return loadRecent();
     }).catch(function (e) {
       setConn('retry', '重连中…');
@@ -505,10 +506,27 @@
       }
     });
   }
+  document.getElementById('hz-new-session').onclick = function () {
+    var button = this;
+    if (busy || button.disabled) return Promise.resolve();
+    button.disabled = true;
+    creatingSession = true;
+    document.getElementById('hz-chat-status').textContent = '正在创建会话…';
+    return hzPost('/api/chat/session', {}).then(function (result) {
+      if (!result.ok || !result.sessionId) throw new Error(result.error || '未返回会话 ID');
+      curTarget = {kind:'root', id:result.sessionId, title:'新会话'};
+      sessKw = '';
+      filterInput.value = '';
+      document.getElementById('hz-chat-status').textContent = '会话已就绪，可发送消息';
+      return loadSessions();
+    }).catch(function (error) {
+      document.getElementById('hz-chat-status').textContent = '创建失败：' + (error.message || '请重试');
+    }).finally(function () { creatingSession = false; button.disabled = false; });
+  };
   function sendMsg() {
     var input = document.getElementById('hz-input');
     var text = (input.value || '').trim();
-    if (!text || busy) return;
+    if (!text || busy || creatingSession) return;
     if (!curTarget) { alert('会话未就绪'); return; }
     busy = true;
     input.value = '';

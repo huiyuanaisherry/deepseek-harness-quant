@@ -176,10 +176,10 @@ def _resolve_route(path: str) -> Path:
 
 try:
     from .web_security import SecurityMixin, contained_path
-    from .model_settings import ModelSettings, DSHClient, SettingsError, proxy_quant
+    from .model_settings import ModelSettings, DSHClient, SettingsError, proxy_quant, create_chat_session
 except ImportError:  # Direct launcher: python deck/deck_server.py
     from web_security import SecurityMixin, contained_path
-    from model_settings import ModelSettings, DSHClient, SettingsError, proxy_quant
+    from model_settings import ModelSettings, DSHClient, SettingsError, proxy_quant, create_chat_session
 
 
 class Handler(SecurityMixin, BaseHTTPRequestHandler):
@@ -259,6 +259,8 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
             actions = {'/api/model-settings/provider':'save',
                        '/api/model-settings/key/remove':'remove_key',
                        '/api/model-settings/default':'set_default'}
+            if path == '/api/chat/session':
+                return self._send_json(create_chat_session(self._read_json()))
             if path in actions:
                 return self._send_json(getattr(self._settings(), actions[path])(self._read_json()))
             if path.startswith('/api/proxy/'):
