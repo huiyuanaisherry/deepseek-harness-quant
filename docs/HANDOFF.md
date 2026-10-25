@@ -101,3 +101,12 @@ GitHub HTTPS 推送没有凭据；origin 的 push URL 已改为 SSH，`ssh -T gi
 | `ui_v2/pages/factors.html` | 已提交；测试与最终整体验收通过 |
 | `ui_v2/pages/report.html` | 已提交；测试与最终整体验收通过 |
 | `ui_v2/pages/settings.html` | 已提交；测试与最终整体验收通过 |
+
+## 已发布交付状态
+
+- 修改已推送到 fork 分支 `codex/privacy-provider-settings`。
+- 草稿 PR：https://github.com/huiyuanaisherry/deepseek-harness-quant/pull/1
+- 功能代码最终审查通过版本：`b067c0a`；之后提交仅更新交接文档。
+- 23 项 Python 和 10 项 Node 测试通过，独立最终审查批准。
+- Windows 运行服务尚未更新，master 尚未合并。下一位 agent 从本文件和计划中继续部署阶段；勿重复隐私扫描或使用真实 Key 做付费测试。
+- 本轮本地合成测试服务已停止；如需演示，按上文命令重新启动。
