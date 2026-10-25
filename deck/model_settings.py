@@ -70,8 +70,11 @@ class DSHClient:
         if not isinstance(result, dict) or result.get('rpcId') != rpc_id or result.get('type') != 'server-response':
             raise SettingsError()
         envelope = result.get('result', {})
+        if not isinstance(envelope, dict):
+            raise SettingsError()
         if envelope.get('ok') is not True:
-            code = envelope.get('error', {}).get('code')
+            error = envelope.get('error')
+            code = error.get('code') if isinstance(error, dict) else None
             raise SettingsError('REVISION_CONFLICT' if code == 'settings-conflict' else 'UPSTREAM_ERROR', 409 if code == 'settings-conflict' else 502)
         value = envelope.get('value')
         if not isinstance(value, dict):

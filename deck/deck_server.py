@@ -226,6 +226,8 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
             return
         try:
             path = self.path.split('?', 1)[0]
+            if path in ('/api/manual_update', '/api/export_data', '/api/live/backtest_run'):
+                return self._error('METHOD_NOT_ALLOWED', 405)
             if path == '/settings':
                 return self._v2_page('settings.html', 'settings missing')
             if path == '/api/model-settings':
@@ -435,25 +437,6 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
                 return self._send_json({"ok": True, "strategies": list_strategies()})
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 500)
-        if path == "/api/live/backtest_run":   # ★2026-08-14 动态回测（因子页「回测」Tab 按参数即时跑）
-            try:
-                import urllib.parse
-                q = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
-                def _g(k, d):
-                    v = (q.get(k) or [d])[0]
-                    return v
-                sys.path.insert(0, str(BASE))
-                from backtest.bt_runner import run_backtest
-                r = run_backtest(strategy=_g("strategy", "tech3"),
-                                 topn=int(_g("topn", "5")),
-                                 stocks=int(_g("stocks", "300")),
-                                 start=_g("start", "2021-01-01"),
-                                 end=_g("end", "2025-12-31"))
-                return self._send_json({"ok": True, **r})
-            except Exception as e:
-                import traceback as _tb
-                _tb.print_exc()
-                return self._send_json({"ok": False, "error": str(e)}, 500)
         if path == "/dashboard.html":   # ★U1-4 301 合并：旧静态系统看板 → /dashboard_live.html（实时系统状态面板）
             return self._redirect("/dashboard_live.html")
         if path == "/dashboard_opp.html":   # ★2026-08-10 机会池看板（UI A4 核心，总指导落地；glob 取最新时间戳版）
@@ -515,13 +498,6 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
                 sys.path.insert(0, str(BASE / "deck"))
                 from system_live import collect
                 return self._send_json(collect())
-            except Exception as e:
-                return self._send_json({"error": str(e)}, 500)
-        if path == "/api/manual_update":   # ★2026-08-10 手动全域更新（POST；自动程序运行中自动拒绝）
-            try:
-                sys.path.insert(0, str(BASE))
-                from data.manual_update import start
-                return self._send_json(start())
             except Exception as e:
                 return self._send_json({"error": str(e)}, 500)
         if path == "/api/update_status":   # ★2026-08-10 手动更新状态（busy/上次结果/日志）
@@ -634,25 +610,6 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
                     _tb.print_exc()
                 except Exception:
                     pass
-                return self._send_json({"error": str(e)}, 500)
-        if path == "/api/export_data":   # ★2026-08-12 用户需求#179：数据导出中心（Excel + 海报）
-            try:
-                import subprocess as _sp_e, glob as _gl_e
-                _r = _sp_e.run([sys.executable, "-X", "utf8",
-                                str(BASE / "report" / "export_center.py")],
-                               capture_output=True, text=True, timeout=180,
-                               encoding="utf-8", errors="replace")
-                _xf = sorted([Path(x) for x in _gl_e.glob(str(BASE / "output" / "data_export_*.xlsx"))],
-                             key=lambda p: p.stat().st_mtime)
-                _pf = sorted([Path(x) for x in _gl_e.glob(str(BASE / "output" / "data_poster_*.html"))],
-                             key=lambda p: p.stat().st_mtime)
-                return self._send_json({
-                    "ok": _r.returncode == 0,
-                    "excel": _xf[-1].name if _xf else None,
-                    "poster": _pf[-1].name if _pf else None,
-                    "log": (_r.stdout or "").strip().splitlines()[-1] if _r.stdout else "",
-                })
-            except Exception as e:
                 return self._send_json({"error": str(e)}, 500)
         if path.startswith("/dl/"):   # ★2026-08-12 #179：导出文件下载（/dl/data_export_xxx.xlsx）
             _name = path.split("/", 2)[2]
@@ -770,6 +727,44 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
 
     def _private_POST(self):
         path = self.path.split("?")[0]
+        if path == "/api/live/backtest_run":   # ★2026-08-14 动态回测（因子页「回测」Tab 按参数即时跑）
+            try:
+                import urllib.parse
+                q = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                def _g(k, d):
+                    v = (q.get(k) or [d])[0]
+                    return v
+                sys.path.insert(0, str(BASE))
+                from backtest.bt_runner import run_backtest
+                r = run_backtest(strategy=_g("strategy", "tech3"),
+                                 topn=int(_g("topn", "5")),
+                                 stocks=int(_g("stocks", "300")),
+                                 start=_g("start", "2021-01-01"),
+                                 end=_g("end", "2025-12-31"))
+                return self._send_json({"ok": True, **r})
+            except Exception as e:
+                import traceback as _tb
+                _tb.print_exc()
+                return self._send_json({"ok": False, "error": str(e)}, 500)
+        if path == "/api/export_data":   # ★2026-08-12 用户需求#179：数据导出中心（Excel + 海报）
+            try:
+                import subprocess as _sp_e, glob as _gl_e
+                _r = _sp_e.run([sys.executable, "-X", "utf8",
+                                str(BASE / "report" / "export_center.py")],
+                               capture_output=True, text=True, timeout=180,
+                               encoding="utf-8", errors="replace")
+                _xf = sorted([Path(x) for x in _gl_e.glob(str(BASE / "output" / "data_export_*.xlsx"))],
+                             key=lambda p: p.stat().st_mtime)
+                _pf = sorted([Path(x) for x in _gl_e.glob(str(BASE / "output" / "data_poster_*.html"))],
+                             key=lambda p: p.stat().st_mtime)
+                return self._send_json({
+                    "ok": _r.returncode == 0,
+                    "excel": _xf[-1].name if _xf else None,
+                    "poster": _pf[-1].name if _pf else None,
+                    "log": (_r.stdout or "").strip().splitlines()[-1] if _r.stdout else "",
+                })
+            except Exception as e:
+                return self._send_json({"error": str(e)}, 500)
         if path == "/api/import/install":   # ★2026-08-16 导入 skill / agent 预设（assets → 运行库）
             try:
                 rec = self._read_json()

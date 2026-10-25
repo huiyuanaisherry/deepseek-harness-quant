@@ -135,3 +135,15 @@ class MutationTests(unittest.TestCase):
         for path in ('/api/proxy/api/credentials.describe','/api/proxy/quantapi/delete', '/api/proxy/quant/agents', '/api/proxy/quant/sessions/../settings'):
             with self.assertRaises(SettingsError):
                 proxy_quant(path,'GET',client=upstream)
+
+    def test_malformed_rpc_nested_envelopes_are_safe_upstream_errors(self):
+        from deck.model_settings import DSHClient
+        from unittest.mock import patch
+        client = DSHClient()
+        for result in (None, [], {'ok':False,'error':None}, {'ok':False,'error':['FAKE_SECRET']}):
+            with self.subTest(result=result), patch.object(client, 'request', side_effect=lambda path, raw: {'type':'server-response','rpcId':__import__('json').loads(raw)['rpcId'],'result':result}):
+                with self.assertRaises(SettingsError) as error:
+                    client('llm.providers', {})
+                self.assertEqual(error.exception.code, 'UPSTREAM_ERROR')
+                self.assertEqual(error.exception.status, 502)
+                self.assertNotIn('FAKE_SECRET', str(error.exception))

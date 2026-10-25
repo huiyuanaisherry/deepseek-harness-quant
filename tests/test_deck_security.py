@@ -83,3 +83,30 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(self.request('/login')[0], 200)
         self.login()
         self.assertTrue(json.loads(self.request('/api/auth/status')[1])['authenticated'])
+
+    def test_actions_require_post_origin_header_and_dispatch_queries(self):
+        import subprocess
+        import types
+        calls = []
+        updater = types.SimpleNamespace(start=lambda: calls.append(('update', {})) or {'ok':True})
+        runner = types.SimpleNamespace(run_backtest=lambda **kw: calls.append(('backtest', kw)) or {'result':'fixture'})
+        exporter = lambda *args, **kw: calls.append(('export', {})) or types.SimpleNamespace(returncode=0, stdout='fixture')
+        actions = ['/api/manual_update', '/api/export_data', '/api/live/backtest_run?strategy=custom&topn=7&stocks=12&start=2023-01-01&end=2023-02-01']
+        self.login()
+        with patch.dict('sys.modules', {'data.manual_update':updater,'backtest.bt_runner':runner}), patch.object(subprocess, 'run', exporter):
+            for action in actions:
+                with self.subTest(action=action):
+                    for headers in ({'Origin':'http://127.0.0.1:9999','X-Quant-Request':''},
+                                    {'Origin':'http://127.0.0.1:9999'}, {'X-Quant-Request':''}):
+                        status, _, _ = self.request(action, extra=headers)
+                        self.assertEqual(status, 405)
+                        self.assertEqual(calls, [])
+                    self.assertEqual(self.request(action, {}, origin=False)[0], 403)
+                    self.assertEqual(self.request(action, {}, extra={'Origin':'http://127.0.0.1:9999'})[0], 403)
+                    self.assertEqual(self.request(action, {}, extra={'X-Quant-Request':''})[0], 403)
+                    self.assertEqual(calls, [])
+            self.assertEqual(self.request(actions[0], {})[0], 200)
+            self.assertEqual(self.request(actions[1], {})[0], 200)
+            self.assertEqual(self.request(actions[2], {})[0], 200)
+            self.assertEqual([kind for kind, _ in calls], ['update','export','backtest'])
+            self.assertEqual(calls[-1][1], {'strategy':'custom','topn':7,'stocks':12,'start':'2023-01-01','end':'2023-02-01'})
