@@ -1,5 +1,7 @@
 # 接手说明：隐私修复与多厂商 Key 配置
 
+> 最新入口：`docs/README.md` 与 `docs/requirements/real-data-validation.md`。Windows 当前功能代码为 `a439c87`；六只真实样本采集和离线技术因子已验收，完整选股链路尚未验收。本文旧版本状态以文末最新记录为准。
+
 ## 当前状态（最终更新：2026-10-25）
 
 用户授权的 fork 分支为 `codex/privacy-provider-settings`，草稿 PR 为 https://github.com/huiyuanaisherry/deepseek-harness-quant/pull/1 。未合并 master。
@@ -174,3 +176,15 @@ GitHub HTTPS 推送没有凭据；origin 的 push URL 已改为 SSH，`ssh -T gi
 - Windows 53 项 Python、31 项 Node 测试通过。重启 `deepseek-quant.service`，它与 `deepseek-harness.service` 均 active。Node 使用 `/home/jack/.local/opt/node22/bin/node`，非交互 shell 的 PATH 没有 node。
 - 已认证 HTTP 检查：`/data-settings`、`/v2/assets/data-settings.js`、`/api/data-settings/tushare` 均 200；API 显示 configured=false、mode=demo。仅内部使用管理令牌建立验收会话，随后注销；未读写真实供应商 Token、未调用供应商。Mac 经 Tailscale 访问页面返回登录跳转303，未认证配置API返回401。
 - 已知兼容问题尚未修复：配置页验证向完整 URL 原路径 POST，而 Windows 实际 Tushare 1.4.29 SDK 会追加 `/{api_name}`（假Token、mock网络复现）。部分标准中转可能验证成功但正式采集404。后续应统一验证和采集传输，并覆盖已安装 SDK 的路径行为。不能把本次发布视为真实取数验证通过。
+
+## 六只真实样本验收与项目知识记录（2026-10-25）
+
+- 用户明确要求项目知识随 Windows 系统保存，不使用 Mac 外部知识库。索引为 `docs/README.md`；需求、当前验收和下一阶段均在 `docs/requirements/real-data-validation.md`。二者随 fork 和 Windows 项目同步。
+- 功能提交 `a439c87d93510fb94d87fd9b794464a43b5bae04` 已部署；`0710dfd` 为本轮第一阶段实现。远程通过已验证 bundle 快进，不覆盖配置和演示数据；后续文档提交不改功能。
+- 已配置 Token 仅保留服务端；未再次输出、写入文档或提交 Git。实际采集统一使用配置页同一 PinnedTransport，绕过终端代理，不追加 SDK API 路径；配置页/实际采集不一致问题已修复。
+- 两年六只样本：000938.SZ、000977.SZ、000063.SZ、603019.SH、601138.SH、688041.SH。全部通过；最新2026-10-23。none/qfq各2884行，共5768行；披露日期校验后财务47行；两只各10个缺失日有全天停牌证据。真实记录仅存在服务器 `data/real-smoke/sample/`，已新增 Git 忽略项，不能上传 CSV 或数据库。
+- 私有报告 `verification.json` 显示 passed=true、demo_unchanged=true；重复写入读回一致、重复键0、quick_check=ok。`strategy_readiness.json` 六只 technical_ready、strategy_acceptance=false；财务季度口径、历史ST、全市场估值与外部因子未验收，不得冒充完整选股成功。
+- 重现命令（项目目录、WSL）：`.venv/bin/python -m data.real_data_sample --config config/real_data_sample.json --as-of 2026-10-25`；随后 `.venv/bin/python -m data.sample_strategy_check --config config/real_data_sample.json`。这是固定快照；改变日期范围/历史长度需要新的 output_dir，窗口冲突会在写 bars 前拒绝。
+- 修复了 Windows pandas3 含空财务值时字符串拼接报错，并新增停牌证据验证及至多2次NETWORK重试；不重试权限/凭据/限流错误。通过独立整体审查，所有重要问题已修复。
+- Windows 79Python+31Node全过（含实际安装Tushare SDK的合成pro_bar测试），服务 deepseek-quant/deepseek-harness 均active。原有 params.yaml、harness/home/settings.yaml 校验值一致，网页仍以 data/demo 运行。
+- 下一位 agent 从需求文档的「下一阶段顺序」继续：先历史ST与按披露日期的财务三表/单季转换，再处理旧scan路径/日期/覆盖阈值与候选池/日报，不必重做六只采集、隐私扫描、Key页面或Mac知识库登记。
