@@ -192,3 +192,15 @@ class SessionCreationTests(unittest.TestCase):
         for response in ({}, {'sessionId':''}, {'sessionId':['PRIVATE']}):
             with self.assertRaises(SettingsError):
                 create_chat_session({},lambda *args:response)
+
+
+class ChatStatusProjectionTests(unittest.TestCase):
+    def test_only_safe_turn_state_and_request_id_reach_browser(self):
+        from deck.model_settings import proxy_quant
+        class Upstream:
+            def request(self,*args):
+                return {'ok':True,'requestId':'new-request','status':{'state':'error','code':'UNSUPPORTED_REASONING_EFFORT','message':'PRIVATE'},'messages':[{'role':'user','text':'hello','id':'new-request'}]}
+        r=proxy_quant('/api/proxy/quantapi/recent','GET',client=Upstream())
+        self.assertEqual(r['status'],{'state':'error','code':'UNSUPPORTED_REASONING_EFFORT'})
+        self.assertEqual(r['requestId'],'new-request')
+        self.assertNotIn('PRIVATE',str(r))

@@ -296,5 +296,14 @@ def proxy_quant(target, method, body=None, client=None):
     for field, keys in [('sessions', ('id','title','preview','role','ts','current')), ('personas', ('key','id','name','persona','title','preview','childId')), ('messages', ('id','role','text','content','ts','timestamp'))]:
         if isinstance(response.get(field), list):
             result[field] = [project(row, keys) for row in response[field][:500]]
-    result.update(project(response, ('sessionId','persona','childId','text','reply','accepted','busy')))
+    result.update(project(response, ('sessionId','persona','childId','text','reply','accepted','busy','requestId')))
+    status = response.get('status')
+    if isinstance(status, dict) and status.get('state') in ('idle','running','error','aborted','unknown'):
+        result['status'] = {'state':status['state']}
+        if text(status.get('requestId')):
+            result['status']['requestId'] = status['requestId']
+        if status['state'] == 'error':
+            codes = {'UNSUPPORTED_REASONING_EFFORT','NO_ADAPTER','AUTHENTICATION','RATE_LIMIT','CONTEXT_LENGTH','INVALID_REQUEST','NETWORK','TIMEOUT'}
+            code = status.get('code')
+            result['status']['code'] = code if isinstance(code, str) and code in codes else 'MODEL_ERROR'
     return result

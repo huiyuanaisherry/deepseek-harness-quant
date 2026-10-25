@@ -1,3 +1,4 @@
+const { randomUUID } = require('node:crypto')
 // 量化系统 ↔ DeepSeek HARNESS 桥接插件（开源版静态化）
 // 来源：dsqq-1 动态插件 v13（牛散 persona 接入 + 会话/聊天桥接）
 // 部署：由 DSH_HOME/profiles/web/cordis.patch.yml 挂载为宿主组合插件行
@@ -82,25 +83,45 @@ module.exports = {
       for (let i = arr.length - 1; i >= 0 && out.length < (limit || 20); i--) {
         const ev = arr[i]
         if (!ev) continue
-        let role = null, content = null, ts = null
+        let role = null, content = null, ts = null, source = null, id = null
         if (ev.type === 'user/message' || ev.type === 'assistant/message') {
           const d = ev.data || {}
           const m = d.message && d.message.role ? d.message : d
           role = ev.type === 'user/message' ? 'user' : 'assistant'
           content = m.content
+          source = m.source
+          id = m.id
           ts = ev.time != null ? ev.time : (d.ts != null ? d.ts : null)
         } else {
           const msg = ev.message || ev
           role = msg && msg.role
           content = msg && msg.content
+          source = msg && msg.source
+          id = msg && msg.id
           ts = (ev.ts != null ? ev.ts : (msg && msg.ts != null ? msg.ts : null))
         }
         if (role !== 'user' && role !== 'assistant') continue
+        if (role === 'user' && source?.kind === 'plugin') continue
         const text = textOfContent(content)
         if (isNoise(text)) continue
-        out.unshift({ role: role, text: text.slice(0, 4000), ts: ts })
+        out.unshift({ role: role, text: text.slice(0, 4000), ts: ts, ...(typeof id === 'string' ? {id} : {}) })
       }
       return out
+    }
+    function turnStatus(events) {
+      const latestUser = (events || []).findLast(event => event.type === 'user/message' && event.data?.source?.kind === 'user' && typeof event.data.id === 'string')
+      const state = value => latestUser ? {...value,requestId:latestUser.data.id} : value
+      const safeCodes = new Set(['UNSUPPORTED_REASONING_EFFORT', 'NO_ADAPTER', 'AUTHENTICATION', 'RATE_LIMIT', 'CONTEXT_LENGTH', 'INVALID_REQUEST', 'NETWORK', 'TIMEOUT'])
+      for (let i = (events || []).length - 1; i >= 0; i--) {
+        const event = events[i]
+        if (event.type === 'turn/start') return state({state:'running'})
+        if (event.type !== 'turn/end') continue
+        const reason = event.data?.reason
+        if (reason?.kind === 'error') return state({state:'error', code:safeCodes.has(reason.error?.code) ? reason.error.code : 'MODEL_ERROR'})
+        if (reason?.kind === 'aborted') return state({state:'aborted'})
+        return state({state:'idle'})
+      }
+      return state({state:'idle'})
     }
     function liveMessages(session, limit) {
       let messages = []
@@ -119,7 +140,7 @@ module.exports = {
         const r = await sessionPersistence.readFrom(id, 0, fakeSignal())
         if (r && Array.isArray(r.events)) {
           debug.events = r.events.length
-          return { messages: extractMessages(r.events, limit), debug: debug }
+          return { messages: extractMessages(r.events, limit), status: turnStatus(r.events), debug: debug }
         }
         debug.error = 'no events array'
         return { messages: null, debug: debug }
@@ -132,10 +153,10 @@ module.exports = {
       const session = resolveSession(id)
       if (session) {
         const live = liveMessages(session, limit)
-        if (live.length) return { messages: live, debug: { live: true, count: live.length } }
+        return { messages: live, status:turnStatus(session.events), debug: { live: true, count: live.length } }
       }
       const c = await coldMessages(id, limit)
-      return { messages: c.messages || [], debug: c.debug }
+      return { messages: c.messages || [], status:c.status || {state:'unknown'}, debug: c.debug }
     }
     function recentTextOf(list) {
       for (let i = list.length - 1; i >= 0; i--) {
@@ -336,9 +357,9 @@ module.exports = {
             }
             content = text + extra
           }
-          await subagents.followup(rootAgent, childId, [{ type: 'text', text: content }],
+          const requestId = await subagents.followup(rootAgent, childId, [{ type: 'text', text: content }],
             { source: { kind: 'user' }, signal: fakeSignal() })
-          json(res, 200, { ok: true, accepted: true, persona: key, childId: childId })
+          json(res, 200, { ok: true, accepted: true, persona: key, childId: childId, requestId })
         } catch (e) { json(res, 500, { ok: false, error: String((e && e.message) || e).slice(0, 200) }) }
       }
     }))
@@ -361,7 +382,7 @@ module.exports = {
           if (!childId) { json(res, 200, { ok: true, persona: key, childId: null, messages: [], debug: { child: null } }); return }
           const limit = Math.max(1, Math.min(50, parseInt(q.limit || '20', 10) || 20))
           const r = await messagesOf(childId, limit)
-          json(res, 200, { ok: true, persona: key, childId: childId, messages: r.messages, debug: r.debug })
+          json(res, 200, { ok: true, persona: key, childId: childId, messages: r.messages, status: r.status, debug: r.debug })
         } catch (e) { json(res, 500, { ok: false, error: String((e && e.message) || e).slice(0, 200) }) }
       }
     }))
@@ -381,11 +402,12 @@ module.exports = {
         try {
           const agent = resolveAgent(sessionId)
           if (!agent) { json(res, 404, { ok: false, error: 'no agent', sessionId: sessionId || defaultAgentId() }); return }
-          const message = { role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' }, ts: Date.now() }
+          const requestId = randomUUID()
+          const message = { id:requestId, role: 'user', content: [{ type: 'text', text }], source: { kind: 'user' }, ts: Date.now() }
           if (typeof agent.followup === 'function') agent.followup(message)
           else if (typeof agent.steer === 'function') agent.steer(message)
           else { json(res, 500, { ok: false, error: 'no followup/steer' }); return }
-          json(res, 200, { ok: true, accepted: true, sessionId: String(agent.id) })
+          json(res, 200, { ok: true, accepted: true, sessionId: String(agent.id), requestId })
         } catch (e) { json(res, 500, { ok: false, error: String((e && e.message) || e).slice(0, 200) }) }
       }
     }))
@@ -400,7 +422,7 @@ module.exports = {
           const sessionId = q.sessionId || defaultAgentId()
           const limit = Math.max(1, Math.min(50, parseInt(q.limit || '20', 10) || 20))
           const r = await messagesOf(sessionId, limit)
-          json(res, 200, { ok: true, sessionId: sessionId, messages: r.messages })
+          json(res, 200, { ok: true, sessionId: sessionId, messages: r.messages, status: r.status })
         } catch (e) { json(res, 500, { ok: false, error: String((e && e.message) || e).slice(0, 200) }) }
       }
     }))

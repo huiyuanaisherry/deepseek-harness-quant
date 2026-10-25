@@ -70,7 +70,8 @@ module.exports = {
           if (Object.keys(value).some(key => !['provider','model','expectedRevision'].includes(key)) || !identifier(value.provider) || !identifier(value.model) || !Number.isInteger(value.expectedRevision) || value.expectedRevision < 0) return fail(res, 400, 'INVALID_REQUEST');
           await settings.mutate(NAMESPACE, [
             { op:'set', path:['provider'], value:value.provider },
-            { op:'set', path:['model'], value:value.model }
+            { op:'set', path:['model'], value:value.model },
+            { op:'unset', path:['reasoningEffort'] }
           ], value.expectedRevision);
           return send(res, 200, view());
         } catch (error) {

@@ -6,7 +6,7 @@ const plugin = require('../harness/home/profiles/web/plugins/quant-model-setting
 function fixture() {
   let handler;
   const calls = [];
-  let selection = { provider: 'mock', model: 'one' };
+  let selection = { provider: 'mock', model: 'one', reasoningEffort:'max' };
   const services = {
     webServer: { register(route) { handler = route.handler; return () => {}; } },
     settings: {
@@ -14,7 +14,7 @@ function fixture() {
       async mutate(ns, ops, revision) {
         calls.push({ ns, ops, revision });
         if (revision !== 3) { const error = new Error('FAKE_SECRET'); error.name = 'SettingsConflictError'; throw error; }
-        selection = Object.fromEntries(ops.map(op => [op.path[0], op.value]));
+        for (const op of ops) { if (op.op === 'unset') delete selection[op.path[0]]; else selection[op.path[0]] = op.value; }
       }
     },
     agentDefaultModel: { currentSelection() { return {...selection, secret:'FAKE_SECRET'}; } }
@@ -40,8 +40,9 @@ test('default selection reads and writes only native owned fields', async () => 
   assert.equal(JSON.stringify(read).includes('FAKE_SECRET'),false);
   const saved = await f.request('POST',JSON.stringify({provider:'other',model:'two',expectedRevision:3}));
   assert.equal(saved.status,200);
-  assert.deepEqual(f.calls,[{ns:'agent-default-model',ops:[{op:'set',path:['provider'],value:'other'},{op:'set',path:['model'],value:'two'}],revision:3}]);
+  assert.deepEqual(f.calls,[{ns:'agent-default-model',ops:[{op:'set',path:['provider'],value:'other'},{op:'set',path:['model'],value:'two'},{op:'unset',path:['reasoningEffort']}],revision:3}]);
   assert.equal(saved.body.defaultModel.provider,'other');
+  assert.deepEqual((await f.request()).body.defaultModel,{provider:'other',model:'two'});
 });
 
 test('all reads and writes require loopback peer exact origin and header', async () => {

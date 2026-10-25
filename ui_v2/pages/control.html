@@ -128,7 +128,7 @@
 <div id="sidebar"></div>
 <div class="v2-wrap">
   <div class="v2-h"><span class="bar"></span><h1>控制</h1><span class="sub">DeepSeek HARNESS · 对话 · 状态 · 自主推进</span></div>
-  <div class="mini" style="opacity:.7">量化系统 ←→ HARNESS 对话直连（自动重连） · 完整 GUI 一键弹出 · 30s 状态刷新</div>
+  <div class="mini" style="opacity:.7">量化系统 ←→ HARNESS 对话直连（自动重连） · 同源模型配置 · 30s 快照刷新</div>
 
   <!-- ★2026-08-16 对话区：自绘聊天（健壮连接：超时 + 指数退避重试 + 自动重连） -->
   <div class="v2-card anim-fade-in-up" style="margin-top:12px;padding:14px 16px">
@@ -171,7 +171,7 @@
   <!-- 状态与最近推进（两列） -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;margin-top:14px">
     <div class="v2-card anim-fade-in-up d1" style="margin-top:0">
-      <h2> 连接状态 <span class="tag" id="hz-tag">…</span></h2>
+      <h2> 运行快照 <span class="tag" id="hz-tag">…</span></h2>
       <div class="mini" id="hz-conn" style="line-height:2"> 加载中…</div>
     </div>
     <div class="v2-card anim-fade-in-up d1" style="margin-top:0">
@@ -299,7 +299,6 @@
   var curTarget = null;       // { kind:'root', id, title } | { kind:'niu', persona, name }
   var busy = false;
   var creatingSession = false;
-  var lastCount = 0;
   var rootsCache = [];
   var niuCache = [];
   var snapshotCache = '';
@@ -331,12 +330,19 @@
       ? '/api/proxy/niuapi/recent?persona=' + encodeURIComponent(curTarget.persona) + '&limit=30'
       : '/api/proxy/quantapi/recent?sessionId=' + encodeURIComponent(curTarget.id) + '&limit=30';
   }
+  function turnFailure(status) {
+    if (status.state === 'aborted') return '本轮已停止';
+    if (status.code === 'UNSUPPORTED_REASONING_EFFORT') return '调用失败：模型不支持当前推理强度。请重新设置默认模型，再新建会话。';
+    return '模型调用失败（' + (status.code || 'MODEL_ERROR') + '），请检查厂商 Key、地址和模型 ID。';
+  }
   function loadRecent() {
     var q = targetQuery();
     if (!q) return Promise.resolve();
     return hzGet(q, curTarget && curTarget.kind === 'niu' ? 30000 : 8000).then(function (d) {
-      lastCount = (d.messages || []).length;
-      renderMsgs(d.messages || [], d.busy);
+      renderMsgs(d.messages || [], d.status && d.status.state === 'running');
+      if (!busy && d.status && (d.status.state === 'error' || d.status.state === 'aborted')) {
+        document.getElementById('hz-chat-status').textContent = turnFailure(d.status);
+      }
     }).catch(function (e) {
       document.getElementById('hz-msgs').innerHTML =
         '<div class="hz-msg sys">🔌 HARNESS 暂不可达（' + esc((e && e.message) || e) + '）—— 自动重连中…（完整 GUI：' +
@@ -393,6 +399,7 @@
     list.innerHTML = html;
     list.querySelectorAll('.hz-sess-item').forEach(function (el) {
       el.addEventListener('click', function () {
+        if (busy || creatingSession) return;
         var kind = el.getAttribute('data-kind');
         var sid = el.getAttribute('data-sid');
         if (kind === 'niu') {
@@ -543,14 +550,13 @@
           waited += 3000;
           hzGet(targetQuery(), curTarget.kind === 'niu' ? 30000 : 8000).then(function (d) {
             var ms = d.messages || [];
-            renderMsgs(ms);
-            var lastUser = null;
-            for (var i = ms.length - 1; i >= 0; i--) { if (ms[i].role === 'user') { lastUser = ms[i]; break; } }
-            var hasNewAgent = lastUser && ms[ms.length - 1].role === 'assistant' && ms[ms.length - 1] !== lastUser;
-            if (hasNewAgent || waited >= 90000) {
+            var currentRequest = res.requestId && ((d.status && d.status.requestId === res.requestId) || ms.some(function (m) { return m.id === res.requestId; }));
+            var failed = currentRequest && d.status && (d.status.state === 'error' || d.status.state === 'aborted');
+            var hasNewAgent = currentRequest && ms.length && ms[ms.length - 1].role === 'assistant' && d.status && d.status.state === 'idle';
+            if (failed || hasNewAgent || waited >= 90000) {
               clearInterval(timer);
               busy = false;
-              document.getElementById('hz-chat-status').textContent = hasNewAgent ? '✓ 已回复' : '（回复超时，见完整 GUI）';
+              document.getElementById('hz-chat-status').textContent = failed ? turnFailure(d.status) : hasNewAgent ? '✓ 已回复' : '回复超时，请稍后刷新会话查看。';
               if (hasNewAgent && curTarget && curTarget.kind === 'niu') {
                 var niuMsg = ms[ms.length - 1];
                 fetch('/api/niu/record', {
@@ -565,7 +571,8 @@
                 }).catch(function () {});
               }
             }
-          }).catch(function () { busy = false; clearInterval(timer); });
+            renderMsgs(ms, currentRequest && d.status && d.status.state === 'running');
+          }).catch(function () { busy = false; clearInterval(timer); document.getElementById('hz-chat-status').textContent = '读取回复失败，请刷新会话重试。'; });
         }, 3000);
       } else {
         busy = false;
@@ -609,9 +616,13 @@
 
   /* ---------- 状态快照（/api/harness） ---------- */
   function loadHarness() {
-    LW.api.get('/api/harness', { bypass: true }).then(function (d) {
+    fetch('/api/harness', {cache:'no-store'}).then(function (r) { return r.json(); }).then(function (d) {
       if (d.error) {
-        document.getElementById('hz-conn').innerHTML = '<span style="color:var(--red)">快照未就绪：' + R._f(d.error) + '</span>';
+        document.getElementById('hz-conn').textContent = '尚未生成运行快照；聊天连接状态见上方。';
+        document.getElementById('hz-tag').textContent = '暂无快照';
+        document.getElementById('hz-goal').textContent = '暂无任务快照';
+        document.getElementById('hz-rounds').textContent = '暂无轮次快照';
+        document.getElementById('hz-docs').textContent = '暂无快照文档';
         return;
       }
       var h = d.harness || {};
