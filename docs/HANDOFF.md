@@ -110,3 +110,16 @@ GitHub HTTPS 推送没有凭据；origin 的 push URL 已改为 SSH，`ssh -T gi
 - 23 项 Python 和 10 项 Node 测试通过，独立最终审查批准。
 - Windows 运行服务尚未更新，master 尚未合并。下一位 agent 从本文件和计划中继续部署阶段；勿重复隐私扫描或使用真实 Key 做付费测试。
 - 本轮本地合成测试服务已停止；如需演示，按上文命令重新启动。
+
+## Windows 部署验收（2026-10-25，覆盖上文未部署状态）
+
+- 已部署并重启 Windows / WSL 的 `deepseek-quant.service` 与 `deepseek-harness.service`（systemd user 服务），均为 active。
+- 实际部署提交：`808bbd095bdca2b41263e3bb088a436b54295b15`，远端部署分支 `deployment/privacy-provider-settings`。随后本分支仅补充交接文档，无运行代码差异。PR 仍是草稿，未合并 master。
+- Windows 访问 GitHub fetch 未及时完成，终止本轮 fetch 后，通过 SSH 传输 Git bundle；bundle verify 通过，并严格核对完整提交 SHA 后切换分支。没有复制 Mac 运行时或凭据。
+- 旧代码回滚分支：`deployment-before-provider-settings-20261025`（`9f72ab7`）。回滚代码会恢复已知旧漏洞，只有明确需要时使用；在部署目录切回该分支，再 `systemctl --user restart deepseek-harness.service deepseek-quant.service`。
+- 原有未跟踪的 `data/demo/stock_basic.csv` 保留；未更改现有数据、Key、默认模型或 Tailscale 暴露范围。
+- WSL 环境重新执行 23 项 Python + 10 项 Node 测试，全部通过。
+- Mac Chrome 实际访问 Windows 服务：`/settings` 跳转管理登录页；远程未认证 `/api/model-settings` 返回 401。
+- 服务端临时认证会话验证：`/settings` 200，原生目录 37 个厂商，导航包含 `/settings`；会话已 logout 撤销。管理令牌未打印，未读取模型 Key，未调用模型。
+- 新管理令牌由服务端生成。用户需在自己的 Windows 终端按 `docs/API配置.md` 获取令牌并登录，再填写真实厂商 Key。真实 Key / 付费模型请求不属于本轮验收。
+- 后续 agent：不必再次部署代码或重复审查；若用户提供实际使用反馈，再据具体问题处理。详细主机连接资料仅保存在本地会话备份及用户 AGENTS.md。
