@@ -46,6 +46,8 @@
             '</div>' +
           '</nav>' +
           '<div class="sb-search" id="' + elId + '-srch"></div>' +
+          /* ★2026-10-25 主系统数据模式：来源由 /api/data-context 提供，未知绝不默认真实 */
+          '<div class="sb-datamode" id="' + elId + '-datamode" data-mode="unknown">主系统数据模式未知</div>' +
           '<div class="sb-foot" id="' + elId + '-foot">' +
             '<span class="sb-mini">数据日 …</span>' +
             '<span class="sb-mini">择时 …</span>' +
@@ -88,6 +90,22 @@
           badge.title = bm.hint || '内部测试构建，非公测发布版';
         }
       }).catch(function () {});
+      // ★2026-10-25 主系统数据模式（demo/cache/unknown）：只显示服务端判定，失败保持未知
+      LW.api.get('/api/data-context', {strict: true, retry: 0}).then(function (ctx) {
+        var box = document.getElementById(elId + '-datamode');
+        if (!box) return;
+        var main = (ctx && ctx.main) || {};
+        var mode = main.mode === 'demo' || main.mode === 'cache' ? main.mode : 'unknown';
+        box.textContent = typeof main.label === 'string' && main.label ? main.label : '主系统数据模式未知';
+        box.title = typeof main.note === 'string' ? main.note : '';
+        box.setAttribute('data-mode', mode);
+      }).catch(function () {
+        var box = document.getElementById(elId + '-datamode');
+        if (!box) return;
+        box.textContent = '主系统数据模式未知';
+        box.title = '无法读取主系统数据配置，不能判定当前数据来源。';
+        box.setAttribute('data-mode', 'unknown');
+      });
       LW.api.get('/api/live/portal_dash').then(function (d) {
         var tm = (d.timing && d.timing.timing) || {};
         var dd = d.data_date || (d.brief && d.brief.date) || tm.date || '';

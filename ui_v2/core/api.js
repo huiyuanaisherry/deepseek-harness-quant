@@ -27,43 +27,63 @@
     var timeout = opts.timeout || 8000;
     var retry = opts.retry !== undefined ? opts.retry : 1;   // 默认重试 1 次
     var bypass = opts.bypass === true;   // 强制刷新（审批/卖出后即时更新用）
+    var strict = opts.strict === true;   // 严格模式：失败绝不返回旧缓存（真实观察池等）
     var cached = cache[url];
     var now = Date.now();
     // 同页缓存：30s 内直接复用（页面内多个组件共用一个 API）
     if (!bypass && cached && now - cached.ts < 30000 && cached.status === 'ok') {
       return Promise.resolve(cached.data);
     }
-    if (inflight[url]) { return inflight[url]; }
+    // 严格/强制刷新不走普通去重，避免拿到别的调用方的降级结果
+    var dedupe = !bypass && !strict;
+    if (dedupe && inflight[url]) { return inflight[url]; }
 
-    var p = fetch(url, { cache: 'no-store' })
-      .then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function (data) {
+    function attempt(remaining) {
+      return request(url, timeout).then(function (data) {
         cache[url] = { ts: Date.now(), data: data, status: 'ok' };
         return data;
-      })
-      .catch(function (err) {
+      }, function (err) {
         // 重试一次（网络抖动）
-        if (retry > 0) {
-          retry--;
-          return fetch(url, { cache: 'no-store' }).then(function (r) {
-            if (!r.ok) throw new Error('HTTP ' + r.status);
-            return r.json();
-          }).then(function (data) {
-            cache[url] = { ts: Date.now(), data: data, status: 'ok' };
-            return data;
-          });
-        }
-        // 重试仍失败：有缓存则降级返回缓存（非白屏），无缓存则抛错
-        if (cached) { cache[url].status = 'err'; return cached.data; }
+        if (remaining > 0) { return attempt(remaining - 1); }
+        // 重试仍失败：严格模式抛错，其他页面沿用旧缓存（非白屏）
+        if (!strict && cached) { cache[url] = { ts: cached.ts, data: cached.data, status: 'err' }; return cached.data; }
         throw err;
-      })
-      .then(function (data) { delete inflight[url]; return data; })
-      .catch(function (err) { delete inflight[url]; throw err; });
-    inflight[url] = p;
+      });
+    }
+
+    var p = attempt(retry);
+    if (dedupe) {
+      inflight[url] = p;
+      var release = function () { delete inflight[url]; };
+      p.then(release, release);
+    }
     return p;
+  }
+
+  // 单次请求：AbortController 真正中止 + 计时器清理（成功/失败都会清）
+  function request(url, timeout) {
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var options = { cache: 'no-store' };
+    if (controller) { options.signal = controller.signal; }
+    var timer = null;
+    return new Promise(function (resolve, reject) {
+      timer = setTimeout(function () {
+        if (controller) { try { controller.abort(); } catch (e) { /* 已被中止 */ } }
+        reject(new Error('TIMEOUT'));
+      }, timeout);
+      fetch(url, options).then(function (r) {
+        if (!r.ok) {
+          var error = new Error('HTTP ' + r.status);
+          error.status = r.status;
+          throw error;
+        }
+        return r.json();
+      }).then(resolve, reject);
+    }).then(function (data) {
+      clearTimeout(timer); return data;
+    }, function (err) {
+      clearTimeout(timer); throw err;
+    });
   }
 
   // 轮询：interval 秒拉一次（后台标签页自动降频 5min——省资源）

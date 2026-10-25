@@ -1,0 +1,97 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>真实观察池 · Deepseek HARNESS Quant</title>
+<link rel="stylesheet" href="/v2/assets/ui_common.css"><link rel="stylesheet" href="/v2/assets/app.css">
+<style>
+.wl{max-width:1280px;margin:32px auto;padding:0 24px 60px;color:#e4e4e7}.eyebrow{color:#a1a1aa;font-size:11px;letter-spacing:2px}
+.wl-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;margin-bottom:20px}
+.wl-head h1{font-size:28px;letter-spacing:-1px;margin:8px 0}
+.wl-head p{color:#a1a1aa;font-size:13px;line-height:1.8;margin:0;max-width:680px}
+.wl-actions{display:flex;gap:8px;flex-wrap:wrap}
+.wl button{background:#25252d;color:#e4e4e7;border:1px solid #3a3a44;border-radius:6px;padding:8px 14px;cursor:pointer;font:inherit;font-size:13px}
+.wl button:hover{border-color:#5e6ad2}
+.wl button.primary{background:#5e6ad2;border-color:#5e6ad2}
+.wl button:disabled{opacity:.45;cursor:not-allowed}
+.wl-status{border-left:3px solid #5e6ad2;background:#191921;padding:12px 16px;font-size:13px;line-height:1.8;margin-bottom:16px}
+.wl-status.error{border-color:#ef7272;color:#ffb4b4}
+.wl-status.warn{border-color:#f2c94c;color:#ffe9a8}
+.wl-status.ok{border-color:#4ade80}
+.wl-source{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:18px}
+.wl-card{border:1px solid #2a2a30;background:#141419;border-radius:10px;padding:14px 16px;min-width:0}
+.wl-card h2{font-size:12px;color:#a1a1aa;margin:0 0 8px;font-weight:500;letter-spacing:1px}
+.wl-card .val{font-size:15px;line-height:1.6;overflow-wrap:anywhere}
+.wl-card .sub{font-size:12px;color:#8b8b95;line-height:1.7;margin-top:6px;overflow-wrap:anywhere}
+.wl-card.watch{border-color:rgba(94,106,210,.55)}
+.wl-card.watch .val{color:#c7cbff}
+.wl-main[data-mode="demo"] .val{color:#f2c94c}
+.wl-main[data-mode="cache"] .val{color:#7dd3fc}
+.wl-main[data-mode="unknown"] .val{color:#ffca8a}
+.wl-notes{list-style:none;padding:0;margin:8px 0 0;font-size:12px;color:#a1a1aa;line-height:1.8}
+.wl-layout{display:grid;grid-template-columns:340px minmax(0,1fr);gap:18px;align-items:start}
+.wl-list-panel{border:1px solid #2a2a30;border-radius:10px;background:#111114;overflow:hidden}
+.wl-search{display:flex;gap:8px;padding:12px;border-bottom:1px solid #2a2a30}
+.wl-search input{flex:1;min-width:0;background:#0a0a0b;color:#e4e4e7;border:1px solid #3a3a44;border-radius:6px;padding:9px;font:inherit;font-size:13px}
+.wl-search input:focus{outline:2px solid #5e6ad2;outline-offset:1px}
+.wl-list-meta{font-size:11px;color:#8b8b95;padding:0 12px 8px}
+.wl-list{max-height:640px;overflow:auto;padding:0 8px 8px}
+.wl-item{display:block;width:100%;text-align:left;background:transparent;border:1px solid transparent;border-radius:8px;padding:10px 10px;margin-bottom:4px;cursor:pointer;color:#e4e4e7}
+.wl-item:hover{background:#191921}
+.wl-item.active{background:rgba(94,106,210,.16);border-color:rgba(94,106,210,.65)}
+.wl-item-top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.wl-item-name{font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.wl-item-code{font-size:11px;color:#8b8b95;font-variant-numeric:tabular-nums}
+.wl-item-bot{display:flex;justify-content:space-between;gap:8px;align-items:baseline;margin-top:5px;font-size:12px;color:#a1a1aa}
+.wl-item-price{font-variant-numeric:tabular-nums}
+.wl-up{color:#ff8f8f}.wl-down{color:#7ee2a8}
+.wl-pill{display:inline-block;font-size:10px;border-radius:10px;padding:1px 7px;border:1px solid #3a3a44;color:#a1a1aa}
+.wl-pill.ok{border-color:rgba(74,222,128,.5);color:#7ee2a8}
+.wl-pill.fail{border-color:rgba(239,114,114,.5);color:#ffb4b4}
+.wl-detail{border:1px solid #2a2a30;border-radius:10px;background:#111114;padding:18px;min-width:0}
+.wl-detail-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;border-bottom:1px solid #2a2a30;padding-bottom:14px;margin-bottom:14px}
+.wl-detail-head h2{font-size:20px;margin:0 0 6px;letter-spacing:-.5px}
+.wl-meta{font-size:12px;color:#a1a1aa;line-height:1.8}
+.wl-adjust{display:flex;gap:6px;flex-wrap:wrap}
+.wl-adjust button.active{background:#5e6ad2;border-color:#5e6ad2}
+.wl-section{margin-top:20px}
+.wl-section h3{font-size:13px;margin:0 0 8px;color:#d4d4d8;letter-spacing:.5px}
+.wl-sub{font-size:12px;color:#8b8b95;line-height:1.8;margin:0 0 8px}
+.wl-chart{border:1px solid #26262d;border-radius:8px;background:#0c0c0f;padding:8px;overflow:hidden}
+.wl-chart svg{display:block;width:100%;height:auto}
+.wl-table-wrap{max-height:380px;overflow:auto;border:1px solid #26262d;border-radius:8px}
+.wl table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+.wl th,.wl td{padding:7px 10px;border-bottom:1px solid #222228;text-align:right;white-space:nowrap}
+.wl th{position:sticky;top:0;background:#191921;color:#a1a1aa;font-weight:500;z-index:1}
+.wl th:first-child,.wl td:first-child{text-align:left}
+.wl tbody tr:hover{background:#16161b}
+.wl-empty{padding:28px 14px}
+.wl-detail .lw-empty{margin:0}
+.wl-blockers{margin:6px 0 0;padding-left:18px;font-size:12px;color:#a1a1aa;line-height:1.9}
+.wl-detail-status{font-size:12px;color:#8b8b95;margin:0 0 10px}
+@media(max-width:900px){.wl-layout{grid-template-columns:1fr}.wl-list{max-height:320px}body{padding-left:0!important}#sidebar{display:none}}
+</style></head><body><div id="sidebar"></div><main class="wl">
+<header class="wl-head"><div><div class="eyebrow" id="wl-eyebrow">WORKSPACE / REAL WATCHLIST</div><h1 id="wl-title">真实观察池</h1><p>只读展示已采集并通过校验的小样本历史快照。此页不触发供应商下载、模型或采集任务；完整选股、候选池与交易能力尚未验收。</p></div>
+<div class="wl-actions"><button id="wl-refresh" type="button">刷新页面数据</button></div></header>
+<div id="wl-status" class="wl-status" role="status" aria-live="polite">正在加载观察池数据…</div>
+<button id="wl-retry" type="button" hidden>重试</button>
+<section class="wl-source" aria-label="数据来源与范围">
+<div class="wl-card watch"><h2>此页来源</h2><div class="val" id="wl-source-label">正在读取来源…</div><div class="sub" id="wl-source-asof">实际截至日未知</div></div>
+<div class="wl-card wl-main" id="wl-main-card" data-mode="unknown"><h2>主系统数据模式</h2><div class="val" id="wl-main-source">主系统数据模式未知</div><div class="sub" id="wl-main-note">尚未读取主系统数据配置。</div></div>
+<div class="wl-card"><h2>范围与口径</h2><div class="val" id="wl-scope">小样本历史快照</div><ul class="wl-notes" id="wl-notes"><li>历史快照，非实时行情</li><li>完整选股、候选池与交易能力尚未验收</li></ul></div>
+</section>
+<div class="wl-layout">
+<section class="wl-list-panel" aria-label="观察池股票列表">
+<div class="wl-search"><input id="wl-search" type="search" placeholder="搜索名称或代码" autocomplete="off" aria-label="搜索名称或代码"></div>
+<div class="wl-list-meta" id="wl-list-meta"></div>
+<div class="wl-list" id="wl-list"><div class="lw-empty"><b>正在加载</b>真实快照列表读取中…</div></div>
+</section>
+<section class="wl-detail" aria-label="股票详情">
+<div id="wl-detail-empty" class="lw-empty"><b>尚未选择股票</b>列表加载后默认选中第一只有效样本。</div>
+<div id="wl-detail-body" hidden>
+<div class="wl-detail-head"><div><h2 id="wl-stock-title">—</h2><div class="wl-meta" id="wl-stock-meta"></div></div>
+<div class="wl-adjust" role="group" aria-label="复权口径"><button id="wl-adjust-none" type="button" class="active" aria-pressed="true">未复权</button><button id="wl-adjust-qfq" type="button" aria-pressed="false">前复权</button></div></div>
+<p class="wl-detail-status" id="wl-detail-status" role="status" aria-live="polite"></p>
+<section class="wl-section"><h3>收盘走势与成交量</h3><div class="wl-chart" id="wl-chart" role="img" aria-label="收盘走势与成交量"></div><p class="wl-sub" id="wl-chart-caption">正在读取行情…</p></section>
+<section class="wl-section"><h3>行情明细</h3><p class="wl-sub" id="wl-bars-meta"></p><div class="wl-table-wrap"><table><thead><tr><th>日期</th><th>开盘</th><th>最高</th><th>最低</th><th>收盘</th><th>成交量</th><th>成交额</th><th>涨跌幅</th><th>换手率</th></tr></thead><tbody id="wl-bars-body"></tbody></table></div></section>
+<section class="wl-section"><h3>供应商原始财务指标</h3><p class="wl-sub" id="wl-finance-meta"></p><div class="wl-table-wrap"><table><thead><tr><th>报告期</th><th>披露日</th><th>EPS</th><th>ROE</th><th>净利润同比</th><th>营收同比</th><th>毛利率</th><th>资产负债率</th><th>每股经营现金流</th><th>每股营收</th></tr></thead><tbody id="wl-finance-body"></tbody></table></div></section>
+<section class="wl-section"><h3>技术指标（样本已有，非本页重算）</h3><p class="wl-sub" id="wl-tech-meta"></p><div class="wl-table-wrap"><table><thead><tr><th>指标</th><th>数值</th></tr></thead><tbody id="wl-tech-body"></tbody></table></div><p class="wl-sub" id="wl-tech-accept">策略验收：未验收。策略通过标记恒为 false，不提供评分、胜率或排名。</p><p class="wl-sub">完整策略尚缺条件</p><ul class="wl-blockers" id="wl-blockers"></ul></section>
+<section class="wl-section"><h3>采集校验</h3><p class="wl-sub" id="wl-verify"></p></section>
+</div></section></div></main>
+<script src="/v2/core/api.js"></script><script src="/v2/components/icons.js"></script><script src="/v2/components/sidebar.js"></script><script>LW.sidebar.render('sidebar',{active:'real-watchlist'});</script><script src="/v2/assets/real-watchlist.js"></script></body></html>

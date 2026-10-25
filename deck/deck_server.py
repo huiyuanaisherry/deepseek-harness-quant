@@ -178,9 +178,11 @@ def _resolve_route(path: str) -> Path:
 try:
     from .web_security import SecurityMixin, contained_path
     from .model_settings import ModelSettings, DSHClient, SettingsError, proxy_quant, create_chat_session
+    from .real_watchlist import RealWatchlistService, WatchlistError
 except ImportError:  # Direct launcher: python deck/deck_server.py
     from web_security import SecurityMixin, contained_path
     from model_settings import ModelSettings, DSHClient, SettingsError, proxy_quant, create_chat_session
+    from real_watchlist import RealWatchlistService, WatchlistError
 
 
 class Handler(SecurityMixin, BaseHTTPRequestHandler):
@@ -236,6 +238,30 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
                 self.server.data_settings = service
             return service
 
+    def _real_watchlist(self):
+        # ★2026-10-25 真实观察池：只读快照服务（revision 计算跨请求复用同一实例）
+        settings = self._data_settings()
+        with DATA_SETTINGS_LOCK:
+            service = getattr(self.server, 'real_watchlist', None)
+            if service is None:
+                service = RealWatchlistService(BASE, data_settings=settings)
+                self.server.real_watchlist = service
+            return service
+
+    def _watchlist_json(self, action: str):
+        import urllib.parse
+        service = self._real_watchlist()
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
+        if action == 'context':
+            return self._send_json(service.context())
+        if action == 'list':
+            return self._send_json(service.list_stocks())
+        prefix = '/api/real-watchlist/stocks/'
+        code = urllib.parse.unquote(self.path.split('?', 1)[0][len(prefix):])
+        adjust = (query.get('adjust') or ['none'])[0]
+        revision = (query.get('revision') or [None])[0]
+        return self._send_json(service.stock_detail(code, adjust, revision or None))
+
     def do_GET(self):
         if not self._gate():
             return
@@ -243,6 +269,14 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
             path = self.path.split('?', 1)[0]
             if path in ('/api/manual_update', '/api/export_data', '/api/live/backtest_run', '/api/data-settings/tushare/verify'):
                 return self._error('METHOD_NOT_ALLOWED', 405)
+            if path == '/real-watchlist':
+                return self._v2_page('real-watchlist.html', 'real watchlist missing')
+            if path == '/api/data-context':
+                return self._watchlist_json('context')
+            if path == '/api/real-watchlist':
+                return self._watchlist_json('list')
+            if path.startswith('/api/real-watchlist/stocks/'):
+                return self._watchlist_json('detail')
             if path == '/data-settings':
                 return self._v2_page('data-settings.html', 'data settings missing')
             if path == '/api/data-settings/tushare':
@@ -263,6 +297,8 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
             if path.startswith('/api/proxy/'):
                 return self._send_json(proxy_quant(self.path, 'GET'))
             return self._private_GET()
+        except WatchlistError as error:
+            return self._error(error.code, error.status)
         except SettingsError as error:
             return self._error(error.code, error.status)
         except (ValueError, UnicodeError):

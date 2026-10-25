@@ -57,6 +57,12 @@
       "url": "/data"
     },
     {
+      "id": "real-watchlist",
+      "label": "真实观察池",
+      "ic": "db",
+      "url": "/real-watchlist"
+    },
+    {
       "id": "help",
       "label": "说明",
       "ic": "help",
