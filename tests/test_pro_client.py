@@ -97,6 +97,29 @@ class ProClientTests(unittest.TestCase):
             self.assertEqual(frame.to_dict('records'), result.to_dict('records'))
             self.assertTrue((Path(tmp) / 'stock_list.csv').is_file())
 
+    def test_installed_sdk_pro_bar_accepts_compatible_client(self):
+        try:
+            import tushare as ts
+        except ImportError:
+            self.skipTest('optional Tushare SDK is not installed')
+        from data.pro_client import ProClient
+        calls = []
+        def transport(endpoint, payload, *args):
+            api = payload['api_name']
+            calls.append(api)
+            if api == 'daily':
+                return {'code': 0, 'data': {'fields': ['ts_code', 'trade_date', 'open', 'high', 'low', 'close', 'pre_close', 'change', 'pct_chg', 'vol', 'amount'], 'items': [
+                    ['000938.SZ', '20260105', 12., 13., 11., 12., 10., 2., 20., 3., 5.],
+                    ['000938.SZ', '20260102', 10., 11., 9., 10., 9., 1., 11.1, 2., 4.]]}}
+            self.assertEqual('adj_factor', api)
+            return {'code': 0, 'data': {'fields': ['ts_code', 'trade_date', 'adj_factor'], 'items': [
+                ['000938.SZ', '20260105', 2.], ['000938.SZ', '20260102', 1.]]}}
+        client = self.client()
+        client._transport = transport
+        frame = ts.pro_bar(api=client, ts_code='000938.SZ', start_date='20260102', end_date='20260105', adj='qfq')
+        self.assertEqual([5., 12.], frame.sort_values('trade_date').close.tolist())
+        self.assertEqual(['daily', 'adj_factor'], calls)
+
 
 if __name__ == '__main__':
     unittest.main()

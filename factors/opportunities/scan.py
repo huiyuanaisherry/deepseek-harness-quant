@@ -1557,7 +1557,8 @@ def load_external_signals() -> dict:
 # ==================== 因子计算 ====================
 
 def compute_factors(px: pd.DataFrame, vx: pd.DataFrame, fin: pd.DataFrame,
-                    basic: pd.DataFrame, st_codes: set) -> pd.DataFrame:
+                    basic: pd.DataFrame, st_codes: set, *,
+                    quality_loader=None, valuation_loader=None) -> pd.DataFrame:
     """全市场因子面板（行=股票，列=因子）"""
     close = px.astype(float)
     ret = close.pct_change()
@@ -1595,7 +1596,7 @@ def compute_factors(px: pd.DataFrame, vx: pd.DataFrame, fin: pd.DataFrame,
     f = f.merge(fin[["sq_net_yoy"]].rename(columns={"sq_net_yoy": "sq_nyoy"}),
                 left_on="code6", right_index=True, how="left", suffixes=("", "_x"))
     # 质量因子（quality.code6 是整数 → 转字符串对齐）
-    q = load_quality()
+    q = (quality_loader or load_quality)()
     if q is not None and not q.empty:
         q["code6"] = q["code6"].astype(str)
         q = q.set_index("code6")
@@ -1617,7 +1618,7 @@ def compute_factors(px: pd.DataFrame, vx: pd.DataFrame, fin: pd.DataFrame,
     #   组合回测口径 min_price=1.5（外包 C4/C8 引擎已内置）；主系统补同款硬筛（non_lowprice）
     f["non_lowprice"] = (f["close"] >= 1.5).astype(int) if "close" in f.columns else 1
     # ★估值因子（备用服务器 daily-basic 真实 PB/PE/股息率；失败降级价格分位近似）
-    val = load_valuation()
+    val = (valuation_loader or load_valuation)()
     if val:
         vdf = pd.DataFrame.from_dict(val, orient="index")
         vdf.index.name = "code"

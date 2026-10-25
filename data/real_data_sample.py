@@ -10,9 +10,11 @@ import numpy as np
 import pandas as pd
 
 from data.cache import DailyCache
+from deck.model_settings import SettingsError
 
 ROOT = Path(__file__).resolve().parents[1]
 FIELDS = {
+    'suspend_d': 'ts_code,trade_date,suspend_timing,suspend_type',
     'trade_cal': 'exchange,cal_date,is_open',
     'stock_basic': 'ts_code,symbol,name,industry,list_date,list_status',
     'daily': 'ts_code,trade_date,open,high,low,close,pre_close,vol,amount,pct_chg',
@@ -78,11 +80,17 @@ def validate_finance(frame, as_of):
         require((frame[col] <= as_of).all(), 'finance_future_date')
     require((frame.ann_date >= frame.end_date).all(), 'finance_invalid_disclosure')
     # Lexical row tie-break makes equal-disclosure revisions independent of response order.
-    frame['_tie'] = frame.astype(str).agg('|'.join, axis=1)
+    frame['_tie'] = frame.astype('string').fillna('').agg('|'.join, axis=1)
     return frame.sort_values(['end_date','ann_date','_tie']).drop_duplicates(['ts_code','end_date'], keep='last').drop(columns='_tie').reset_index(drop=True)
 
 
 def write_verified(cache, code, raw, qfq):
+    # This private cache holds a fixed snapshot. Use a new output directory when
+    # changing the date window; check both adjustments before any mutation.
+    for adjust, frame in [('none', raw), ('qfq', qfq)]:
+        existing = cache.get_daily(code, adjust=adjust)
+        require(existing is None or existing.empty or existing.date.tolist() == frame.date.tolist(),
+                'cache_window_conflict_use_new_output')
     for adjust, frame in [('none',raw),('qfq',qfq)]:
         cache.put_daily(code, frame, adjust=adjust, source='tushare')
         first = cache.get_daily(code, adjust=adjust)
@@ -133,12 +141,14 @@ def run(config_path, as_of=None, client=None, root=ROOT):
     require(all(re.fullmatch(r'\d{6}\.(SZ|SH|BJ)', s['code']) for s in symbols), 'invalid_symbol')
     history = int(config.get('history_days',730)); finance = int(config.get('finance_days',730))
     cap = int(config.get('max_rows',1000))
+    network_attempts = int(config.get('network_attempts', 2))
+    require(1 <= network_attempts <= 2, 'network_attempts_limit')
     require(1 <= history <= 730 and 1 <= finance <= 730 and 1 <= cap <= 1000, 'query_limit')
     stamp = date.fromisoformat(as_of) if as_of else date.today()
     end = stamp.strftime('%Y%m%d'); start = (stamp-timedelta(days=history)).strftime('%Y%m%d')
     out = private_path(root, root/config.get('output_dir','data/real-smoke/sample'))
     names = ['trade_cal.csv', 'bars.db', 'bars.db-journal', 'bars.db-wal', 'bars.db-shm', 'verification.json']
-    names += [sample['code']+'_'+api+'.csv' for sample in symbols for api in ['stock_basic','daily','adj_factor','daily_basic','fina_indicator','finance_asof']]
+    names += [sample['code']+'_'+api+'.csv' for sample in symbols for api in ['stock_basic','daily','adj_factor','daily_basic','fina_indicator','finance_asof','suspend_d']]
     # Validate every possible destination before even creating output directories.
     for name in names:
         private_path(root, out/name)
@@ -146,13 +156,20 @@ def run(config_path, as_of=None, client=None, root=ROOT):
         return private_path(root, out/name)
     out.mkdir(parents=True, exist_ok=True)
     before = demo_signatures(root)
-    report = {'as_of':end,'start_date':start,'symbols':{},'units':{'volume':'hand (100 shares)','amount':'thousand CNY','source':'tushare'},'finance_semantics':'raw provider indicators; growth not converted to single quarter','historical_st_status':'unknown; ST-sensitive strategy acceptance blocked','demo_before':before}
+    report = {'query_attempts':{},'as_of':end,'start_date':start,'symbols':{},'units':{'volume':'hand (100 shares)','amount':'thousand CNY','source':'tushare'},'finance_semantics':'raw provider indicators; growth not converted to single quarter','historical_st_status':'unknown; ST-sensitive strategy acceptance blocked','demo_before':before}
     if client is None:
         from data.fetcher_tushare import _pro
         client = _pro()
     def query(api, **params):
         limit = history+2 if api == 'trade_cal' else cap
-        result = getattr(client, api)(fields=FIELDS[api], limit=limit, **params)
+        for attempt in range(network_attempts):
+            report['query_attempts'][api] = report['query_attempts'].get(api, 0) + 1
+            try:
+                result = getattr(client, api)(fields=FIELDS[api], limit=limit, **params)
+                break
+            except SettingsError as exc:
+                if exc.code != 'NETWORK' or attempt + 1 >= network_attempts:
+                    raise
         require(isinstance(result,pd.DataFrame), 'invalid_response')
         limit = history+2 if api == 'trade_cal' else cap
         require(len(result) < limit, 'possible_truncation')
@@ -188,9 +205,39 @@ def run(config_path, as_of=None, client=None, root=ROOT):
                 require(isinstance(allowed,dict) and all(isinstance(v,str) and v.strip() for v in allowed.values()), 'invalid_suspension_evidence')
                 missing = set(wanted)-set(frames['daily'].trade_date)
                 item.update(expected_count=len(wanted),observed_count=len(frames['daily']),missing_dates=sorted(missing))
-                require(set(allowed) == missing, 'unverified_missing_dates')
+                verified = set(allowed)
+                require(verified.issubset(missing), 'invalid_suspension_evidence')
                 item['explicit_suspensions'] = allowed
-                raw,qfq = prepare_bars(frames['daily'],frames['adj_factor'],frames['daily_basic'],[d for d in wanted if d not in allowed])
+                item['suspension_evidence'] = {}
+                item['suspension_verification_mode'] = 'manual' if allowed else 'none'
+                remaining = missing - verified
+                if remaining:
+                    evidence_name = code+'_suspend_d.csv'
+                    suspension = query('suspend_d', ts_code=code, start_date=min(remaining), end_date=max(remaining))
+                    suspension.to_csv(destination(evidence_name),index=False)
+                    require(suspension.ts_code.eq(code).all(), 'suspension_symbol_mismatch')
+                    suspension_dates = dates(suspension.trade_date)
+                    require(suspension_dates.between(min(remaining),max(remaining)).all(), 'suspension_date_range')
+                    require(suspension.suspend_type.isin(['S','R']).all(), 'suspension_invalid_type')
+                    full_day = suspension.suspend_timing.isna() | suspension.suspend_timing.astype('string').fillna('').str.strip().eq('')
+                    full_s = suspension.suspend_type.eq('S') & full_day
+                    for missing_date in sorted(remaining):
+                        records = suspension.trade_date.eq(missing_date)
+                        if records.any() and full_s[records].all():
+                            verified.add(missing_date)
+                            item['suspension_evidence'][missing_date] = evidence_name
+                    item['suspension_verification_mode'] = 'manual_and_supplier' if allowed else 'supplier'
+                require(verified == missing, 'unverified_missing_dates')
+                # Full-day suspensions can still have a published adjustment factor.
+                # Permit only proven halted dates as extras, never arbitrary dates.
+                observed = set(frames['daily'].trade_date)
+                for api in ['adj_factor','daily_basic']:
+                    frame = frames[api]
+                    dates(frame.trade_date)
+                    require(not frame.trade_date.duplicated().any(), 'duplicate_date')
+                    require(set(frame.trade_date).issubset(observed | verified), 'date_alignment')
+                    frames[api] = frame.loc[frame.trade_date.isin(observed)].copy()
+                raw,qfq = prepare_bars(frames['daily'],frames['adj_factor'],frames['daily_basic'],[d for d in wanted if d not in verified])
                 fin = validate_finance(frames['fina_indicator'],end)
                 fin.to_csv(destination(code+'_finance_asof.csv'),index=False)
                 item.update(rows=len(raw),finance_rows=len(fin),latest_date=raw.date.iloc[-1],repeat_write_readback=write_verified(cache,code,raw,qfq),status='passed')

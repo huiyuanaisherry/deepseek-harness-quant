@@ -35,5 +35,6 @@
   "history_days": 730,
   "finance_days": 730,
   "max_rows": 1000,
-  "output_dir": "data/real-smoke/sample"
+  "output_dir": "data/real-smoke/sample",
+  "network_attempts": 2
 }
