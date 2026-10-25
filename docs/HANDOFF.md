@@ -123,3 +123,14 @@ GitHub HTTPS 推送没有凭据；origin 的 push URL 已改为 SSH，`ssh -T gi
 - 服务端临时认证会话验证：`/settings` 200，原生目录 37 个厂商，导航包含 `/settings`；会话已 logout 撤销。管理令牌未打印，未读取模型 Key，未调用模型。
 - 新管理令牌由服务端生成。用户需在自己的 Windows 终端按 `docs/API配置.md` 获取令牌并登录，再填写真实厂商 Key。真实 Key / 付费模型请求不属于本轮验收。
 - 后续 agent：不必再次部署代码或重复审查；若用户提供实际使用反馈，再据具体问题处理。详细主机连接资料仅保存在本地会话备份及用户 AGENTS.md。
+
+## 会话未就绪修复（2026-10-25）
+
+- 用户完成厂商配置后，在控制页发送测试消息出现「会话未就绪」。实测 DSH 服务正常，`/quant/sessions` 返回 0 个根会话，牛散目录正常。
+- 根因：没有新建主会话入口；空根会话被过滤；首次成功读取不更新初始连接徽章。
+- `c44d359` 增加受登录/同源保护的 POST `/api/chat/session`，固定调用原生 RPC `session.create`、空 payload，只返回校验后的 sessionId；不允许浏览器指定 cwd/preset/options，不自动发消息。
+- 控制页增加「新建会话」、保留空会话、正确连接/空状态；`creatingSession` 防止创建期间误发旧会话。独立 reviewer 初审发现竞态，回归先失败后修复，复审 APPROVE 无阻塞。
+- 本地及 WSL：25 Python + 13 Node 测试全部通过。Windows 已更新到 `c44d35958b49d7baa6bba4a642c054186e0f1e41` 并只重启 Python 页面服务；DSH 未重启，用户的 settings.yaml 修改及凭据保留。
+- 线上验收：认证后 control HTML 存在新按钮；POST 成功创建一个空主会话，桥接列表可见且 recent 消息为 []。未调用模型，未读取厂商 Key；临时测试登录会话已撤销。
+- 用户浏览器因 Python 重启需使用原管理令牌重新登录，再打开 /control 选中主会话发送连接测试。目前仍没有实际模型回复证据，不能宣称模力方舟 Key 连通已验证。
+- 另见控制页旧快照卡 `/api/harness` 返回404，和会话/模型调用不同；本轮未扩展快照功能。截图 `/tmp/quant-session-fix-login.png` 为部署后重新登录页。
