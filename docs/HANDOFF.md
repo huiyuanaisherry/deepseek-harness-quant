@@ -166,3 +166,11 @@ GitHub HTTPS 推送没有凭据；origin 的 push URL 已改为 SSH，`ssh -T gi
 - 页面显示数据模式（`LWQUANT_CACHE_DIR` > `data.cache_dir` > 默认 `data/cache`，含 demo 段时提示演示数据），说明保存/验证不会切换目录。
 - 验证：Python 53 项、Node 31 项、`py_compile`/`node --check` 全过；外部 Chrome 合成 fixture 已逐项验收（首配缺 Token、保存、三项验证、换址缺 Token、HTTP 未确认、确认后保存、刷新清空），截图留存但未提交。
 - 尚未推送 PR，未部署 Windows，未读取或写入真实 Token，也未发起真实 Pro 请求。fixture 进程已停止。
+
+## Tushare 配置页发布（2026-10-25，覆盖上文未部署状态）
+
+- 用户要求先发布现有版本。功能提交 `cc0fc73359288c1c4c232d053aeea3193d2edc63` 已推送 fork 的 `codex/privacy-provider-settings` 并部署 Windows / WSL；PR1 继续保留，未合并 master。
+- Windows 部署分支 `deployment/privacy-provider-settings` 通过已验证 Git bundle 快进更新；回滚代码分支 `deployment-before-tushare-20261025` 指向 `74ed001`。未覆盖用户修改的 `harness/home/settings.yaml` 或数据目录。部署前后 `config/params.yaml`、`harness/home/settings.yaml` SHA256 校验一致。
+- Windows 53 项 Python、31 项 Node 测试通过。重启 `deepseek-quant.service`，它与 `deepseek-harness.service` 均 active。Node 使用 `/home/jack/.local/opt/node22/bin/node`，非交互 shell 的 PATH 没有 node。
+- 已认证 HTTP 检查：`/data-settings`、`/v2/assets/data-settings.js`、`/api/data-settings/tushare` 均 200；API 显示 configured=false、mode=demo。仅内部使用管理令牌建立验收会话，随后注销；未读写真实供应商 Token、未调用供应商。Mac 经 Tailscale 访问页面返回登录跳转303，未认证配置API返回401。
+- 已知兼容问题尚未修复：配置页验证向完整 URL 原路径 POST，而 Windows 实际 Tushare 1.4.29 SDK 会追加 `/{api_name}`（假Token、mock网络复现）。部分标准中转可能验证成功但正式采集404。后续应统一验证和采集传输，并覆盖已安装 SDK 的路径行为。不能把本次发布视为真实取数验证通过。
