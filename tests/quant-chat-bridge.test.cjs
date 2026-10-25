@@ -18,7 +18,7 @@ function fixture(events) {
 }
 const user=(text,source={kind:'user'},id='request-1')=>({type:'user/message',data:{role:'user',id,source,content:[{type:'text',text}]}});
 test('chat exposes user/assistant messages but excludes plugin instructions and runtime context',async()=>{
- const f=fixture([user('hello'),user('<system-reminder>PRIVATE INSTRUCTIONS</system-reminder>',{kind:'plugin',plugin:'instructions'}),{type:'assistant/message',data:{role:'assistant',content:[{type:'text',text:'connected'}]}}]);
+ const f=fixture([user('hello'),user('<system-reminder>PRIVATE INSTRUCTIONS</system-reminder>',{kind:'plugin',plugin:'instructions'}),user('PRIVATE WORKSPACE RULES',{kind:'agent-instructions'}),user('PRIVATE SKILL CATALOG',{kind:'skill-catalog'}),{type:'assistant/message',data:{role:'assistant',content:[{type:'text',text:'connected'}]}}]);
  const r=await f.request('/quant/recent?sessionId=root');
  assert.deepEqual(r.messages.map(m=>m.text),['hello','connected']);
  assert.equal(r.messages[0].id,'request-1');

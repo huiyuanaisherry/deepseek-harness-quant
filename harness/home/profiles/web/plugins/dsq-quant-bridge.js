@@ -101,7 +101,7 @@ module.exports = {
           ts = (ev.ts != null ? ev.ts : (msg && msg.ts != null ? msg.ts : null))
         }
         if (role !== 'user' && role !== 'assistant') continue
-        if (role === 'user' && source?.kind === 'plugin') continue
+        if (role === 'user' && source && source.kind !== 'user') continue
         const text = textOfContent(content)
         if (isNoise(text)) continue
         out.unshift({ role: role, text: text.slice(0, 4000), ts: ts, ...(typeof id === 'string' ? {id} : {}) })
