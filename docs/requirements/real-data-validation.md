@@ -47,9 +47,18 @@
 - Windows 79 项 Python、31 项 Node 测试通过（Python 含真实安装 SDK 的合成集成测试）；本地 Python 79 项运行，1 项因未装可选 SDK 跳过。两项服务 active，原有 params.yaml 与模型 settings.yaml 校验值未变化。
 - 网页继续使用 data/demo；没有切换数据源、运行选股生产输出、启动定时任务或交易。
 
+### 真实观察池只读页面（本地实现，未部署）
+
+- 目标：在不切换全站数据源的前提下，用网页只读展示 `data/real-smoke/sample/` 的六只真实历史快照，并明确「此页是真实快照、主系统仍是演示数据」。名单唯一来源是 `config/real_data_sample.json`。
+- 交付：提交 `8edfe1d`（`codex/privacy-provider-settings`）。`/real-watchlist` 页面加 `/api/data-context`、`/api/real-watchlist`、`/api/real-watchlist/stocks/{code}` 三个只读 GET，均在登录校验之后并返回 no-store。
+- 边界：SQLite 只读打开、不建库建表；列/代码/口径白名单；路径限制在 `data/real-smoke` 并拒绝符号链接；快照变化返回 409 并让前端重取；NaN 转 null；成交量/成交额只做一次单位换算；不触发供应商、模型或采集，不修改 `data/demo`。
+- 验收：本地 Python 94 项、Node 59 项通过；合成 fixture 外部 Chrome 验收覆盖登录、侧栏主系统模式、观察池来源与截至日、六只列表、搜索、详情图表/行情/财务、none/qfq 切换与刷新，控制台无报错，网络仅本地只读 API。
+- 未完成：Windows 部署未执行（SSH 公钥被拒，用户选择先跳过），因此 `http://100.123.203.13:8787/real-watchlist` 尚未上线本期页面；真实六只页面的 Mac Chrome 验收、Windows 测试重跑与只读哈希核对待部署后完成。完整选股、评分、胜率与排名仍未验收，页面明确标注 `strategy_acceptance=false`。
+
 ## 下一阶段顺序
 
 1. 接入并校验按日期生效的 ST / 名称变更与可交易状态，禁止把历史状态未知当作非 ST。
 2. 补财务三表，按披露日期选取可知版本，累计值转单季，并核对百分比、小数、ROE 和现金流口径；不能把年同比直接当单季同比。
 3. 明确小样本观察池与全市场筛选的区别。估值分位需真实目标股票池，外部因子及基准需覆盖检查；旧 scan 的固定日期、覆盖阈值和路径需单独改造与回归。
 4. 再运行现有筛选、候选池、日报与页面联调；通过后才切换真实数据网页，并设置盘后增量和失败状态。
+5. 恢复 Windows SSH 通道后部署 `8edfe1d`：按 bundle 快进 `deployment/privacy-provider-settings`，重跑 Python/Node 测试，用管理会话检查页面与三个接口，再在 Mac Chrome 经 Tailscale 验证六只真实快照、口径切换与刷新只读性。

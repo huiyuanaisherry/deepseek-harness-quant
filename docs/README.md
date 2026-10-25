@@ -9,7 +9,7 @@
 3. [历史交接与部署记录](HANDOFF.md)：每轮版本、验证证据及已知问题。较旧的「尚未部署」等描述以文末最新记录为准。
 4. [隐私审查记录](reviews/2026-10-25-privacy-and-provider-settings.md)：审查范围、已修复问题和边界，不代表第三方依赖与供应商的无限安全保证。
 5. [小样本实施计划](superpowers/plans/2026-10-25-real-data-sample.md)：实现任务及复现入口。
-6. [交给 Trae 的真实观察池方案](superpowers/plans/2026-10-25-real-watchlist-for-trae.md)：下一步只读网页展示、演示标识、接口与发布验收；当前仅方案，尚未实现。
+6. [交给 Trae 的真实观察池方案](superpowers/plans/2026-10-25-real-watchlist-for-trae.md)：只读 `/real-watchlist` 页面与三个来源接口已实现（提交 `8edfe1d`），本地合成数据 Chrome 验收通过；Windows 尚未部署，真实六只页面验收待恢复 SSH 后进行。
 
 ## 长期规则
 

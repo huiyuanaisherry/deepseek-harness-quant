@@ -1,6 +1,6 @@
 # 接手说明：隐私修复与多厂商 Key 配置
 
-> 最新入口：`docs/README.md` 与 `docs/requirements/real-data-validation.md`。Windows 当前功能代码为 `a439c87`；六只真实样本采集和离线技术因子已验收，完整选股链路尚未验收。本文旧版本状态以文末最新记录为准。
+> 最新入口：`docs/README.md` 与 `docs/requirements/real-data-validation.md`。Windows 当前功能代码仍为 `a439c87`；本地分支已推送真实观察池提交 `8edfe1d`，但未部署到 Windows。六只真实样本采集和离线技术因子已验收，完整选股链路尚未验收。本文旧版本状态以文末最新记录为准。
 
 ## 当前状态（最终更新：2026-10-25）
 
@@ -188,3 +188,16 @@ GitHub HTTPS 推送没有凭据；origin 的 push URL 已改为 SSH，`ssh -T gi
 - 修复了 Windows pandas3 含空财务值时字符串拼接报错，并新增停牌证据验证及至多2次NETWORK重试；不重试权限/凭据/限流错误。通过独立整体审查，所有重要问题已修复。
 - Windows 79Python+31Node全过（含实际安装Tushare SDK的合成pro_bar测试），服务 deepseek-quant/deepseek-harness 均active。原有 params.yaml、harness/home/settings.yaml 校验值一致，网页仍以 data/demo 运行。
 - 下一位 agent 从需求文档的「下一阶段顺序」继续：先历史ST与按披露日期的财务三表/单季转换，再处理旧scan路径/日期/覆盖阈值与候选池/日报，不必重做六只采集、隐私扫描、Key页面或Mac知识库登记。
+
+## 真实观察池只读页面（2026-10-25，本地实现与合成验收，未部署）
+
+- 依据 `docs/superpowers/plans/2026-10-25-real-watchlist-for-trae.md` 实现只读观察池。功能提交 `8edfe1d`（14 个文件，+2314/−25）已推送 `origin/codex/privacy-provider-settings`；PR1 https://github.com/huiyuanaisherry/deepseek-harness-quant/pull/1 仍是草稿，本轮未改 PR 说明（本机无 `gh`，HTTPS 无凭据）。
+- 新增 `/real-watchlist`（登录保护）与三个 GET：`/api/data-context`、`/api/real-watchlist`、`/api/real-watchlist/stocks/{code}?adjust=qfq|none&revision=...`。页面与接口均在 `_gate()` 之后，响应 `Cache-Control: no-store`；未登录 API 401、页面 303 到 `/login`。
+- 名单只来自 `config/real_data_sample.json` 的 `symbols`，Python/HTML/JS/`config/real_watchlist.json` 都不写股票代码。新文件：`deck/real_watchlist.py`、`ui_v2/pages/real-watchlist.html`、`ui_v2/assets/real-watchlist.js`、`config/real_watchlist.json(.example)`、`tests/test_real_watchlist.py`、`tests/real-watchlist.test.cjs`、`tests/api-client.test.cjs`；修改 `deck/deck_server.py`、`ui_v2/core/api.js`、`ui_v2/components/sidebar.js`、`ui_v2/assets/ui_common.css`、`config/navigation.json(.example)`。
+- 只读与安全边界：SQLite 仅 `mode=ro`（不建库建表、不用 `immutable=1`）；列为服务端白名单，SQL 参数化；路径限制在项目 `data/real-smoke` 下并拒绝父目录/目标符号链接；revision 由配置投影与文件 size/mtime 生成，读前读后复核，变化返回 409 `SNAPSHOT_CHANGED`，前端重取一次列表；NaN/Infinity 转 null；tushare 手/千元经 `normalize_units` 只转一次；异常不原样透传；GET 不触发供应商、模型、采集或写库。
+- 全站侧栏新增主系统数据模式：`demo`→「主系统：演示数据」、`cache`→「主系统：缓存数据」、取不到→「主系统数据模式未知」，不默认真实。观察池页额外显示「此页：真实历史快照 · 小样本观察池」与实际截至日，均来自 API。`ui_v2/core/api.js` 新增向后兼容的 `strict`、真正生效的 `bypass`（跳过缓存/去重）、AbortController 超时与计时器清理，其他页面默认行为不变。
+- 本地验证：`python3 -m unittest discover -s tests` 94 项通过（1 项因未装可选 SDK 跳过）；`node --test tests/*.cjs` 59 项通过；`git diff --check` 通过。
+- 合成 fixture 外部 Chrome 验收（`127.0.0.1:8791`，独立临时根目录，仅合成数据，不读真实配置/不联网）：登录后侧栏显示「主系统：演示数据」；观察池显示「此页：真实历史快照 · 小样本观察池 / 实际截至 2026-10-25」和「6 只样本 · 132 条行情 · 12 条财务」；6 只列表、搜索筛选（显示 1 只）、刷新后回到 6 只；详情图表 1 个 SVG、11 行行情、2 行财务、策略「未验收」与阻塞项；`none`→`qfq` 切换后首行收盘 10.35→9.77、口径文案更新；控制台无报错，网络仅 3 个本地只读 API。截图存于工作区 `trae-evidence/20261025-real-watchlist-fixture.jpg`，未提交 Git（不含凭据）。
+- **Windows 未部署**：`jack@100.123.203.13` 与 `jack@192.168.31.86` SSH 均 `Permission denied (publickey)`，而 `http://100.123.203.13:8787/login` 返回 200，判断为 Windows OpenSSH 公钥授权丢失（本机公钥 `codex-ai-workbench`）。用户本轮选择先跳过部署。因此 `http://100.123.203.13:8787/real-watchlist` 尚未包含本期页面，Windows 测试重跑、真实六只页面验收、只读哈希核对均未执行。
+- 恢复部署时：把 `8edfe1d` 打包为 Git bundle，SSH 传输后在 `deployment/privacy-provider-settings` 严格核对 SHA 并快进；部署前后保存 `config/params.yaml`、`harness/home/settings.yaml` 的 SHA256（不输出内容）与 `data/demo`、`data/real-smoke` 文件哈希；重启 `deepseek-quant.service`；Windows 用 `/home/jack/.local/opt/node22/bin/node` 重跑 Python/Node 测试；管理会话核对页面、JS、三个接口均 200 后注销；Mac Chrome 经 Tailscale 访问并对比只读哈希；其他业务页仍应显示演示模式。
+- 遗留审查意见（低优先级）：`context()` 复用 `_rows` 全量读取，侧栏每次加载较重，可加短缓存或轻量摘要；`config/real_watchlist.json` 的 `sampleConfig` 未校验 root 前缀（只从项目配置读取，风险低）。
