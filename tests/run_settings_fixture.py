@@ -9,9 +9,40 @@ import tempfile
 from pathlib import Path
 from http.server import ThreadingHTTPServer
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from deck.deck_server import Handler
+from deck.deck_server import Handler as QuantHandler
 from deck.model_settings import ModelSettings, SettingsError
 from deck.web_security import Security
+
+
+class Handler(QuantHandler):
+    """Expose only the settings workflow, never live research or proxy actions."""
+
+    def do_GET(self):
+        path = self.path.split('?', 1)[0]
+        if path == '/':
+            if self._gate():
+                self.send_response(303)
+                self.send_header('Location', '/settings')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+            return
+        if path in ('/api/build_mode', '/api/live/portal_dash'):
+            if self._gate():
+                self._send_json({'mode': 'fixture', 'data_date': '合成测试', 'timing': {}})
+            return
+        allowed = {'/login', '/settings', '/api/auth/status',
+                   '/api/model-settings', '/api/navigation'}
+        if path in allowed or path.startswith(('/v2/assets/', '/v2/core/', '/v2/components/')):
+            return super().do_GET()
+        self._send_json({'ok': False, 'error': 'Fixture route unavailable'}, 404)
+
+    def do_POST(self):
+        path = self.path.split('?', 1)[0]
+        allowed = {'/api/auth/login', '/api/auth/logout', '/api/model-settings/provider',
+                   '/api/model-settings/key/remove', '/api/model-settings/default'}
+        if path in allowed:
+            return super().do_POST()
+        self._send_json({'ok': False, 'error': 'Fixture route unavailable'}, 404)
 
 
 class FixtureTransport:
