@@ -1,0 +1,103 @@
+# 接手说明：隐私修复与多厂商 Key 配置
+
+## 当前状态
+
+用户已批准推荐方案，并授权在 `huiyuanaisherry/deepseek-harness-quant` 修改。
+分支：`codex/privacy-provider-settings`；上游/用户 fork 基线均为 `9f72ab7`。
+最新功能代码提交：`b067c0a`（后续交接文档提交不改变代码）。尚未合并 master，也没有更新 Windows 生产服务。
+
+功能实现、最终独立审查和修复后的 Chrome 复验均已完成；交付至用户 fork 分支。**尚未部署到 Windows 生产服务，也未合并 master。**
+
+## 已完成和证据
+
+- 本地隐私审查见 `docs/reviews/2026-10-25-privacy-and-provider-settings.md`。未发现暗中窃取信息的第一方代码，但已验证任意文件读取漏洞；AI 正常调用仍会发送上下文及部分随机标识。不要将其描述为“绝无隐私风险”。
+- `52de1f4`：登录/会话保护、文件路径边界、受限 DSH 配置接口。
+- `8a6c382`：更新/导出/回测执行改为受保护 POST，堵住旧 GET 绕过写入检查。
+- `430f730`：DSH rc.6 默认模型兼容插件。独立 Python/安全复审通过，无 Important/Critical；18 Python + 3 Node 测试通过。
+- `8ebfce1`、`5a8a7ba`：中文配置页、动态菜单、客户端写入保护和文档、登录令牌说明。
+- Chrome 实测通过：假 Key 保存、原生厂商模型目录更新、默认切换、刷新保留、移除 Key、自定义兼容厂商、部分写入失败提示。
+- 隔离的真实 DSH rc.6 测试通过：读取 37 个厂商、保存合成厂商和假 Key、切换默认、恢复默认、删除测试凭据/厂商。没有调用模型、没有费用。
+- UI 审查发现测试服务器仍可调用真实业务 Handler；`78d210a` 新增测试先失败（6 个子用例），再用测试路由允许列表隔离，22 Python + 10 Node 测试通过。
+
+## 当前验收结果与下一阶段
+
+- 最终整分支审查已通过至 `b067c0a`，无剩余 Critical / Important / MEDIUM。详细报告在本地 `.superpowers/sdd/final-review.md`。
+- `b067c0a` 显式关闭被拒绝重定向和 HTTPError 的响应。新回归测试先失败后通过；`python3 -W error::ResourceWarning -m unittest discover -s tests -v` 最新 **23 项通过且无 ResourceWarning 输出**；Node **10 项通过**。
+- `78d210a` 修复测试服务器隔离；重启后已用 Chrome 复验登录直接进入 `/settings`、导航显示合成数据、保存假 Key 成功且输入清空。旧测试进程已随中断消失，未继续使用旧 Handler。
+- UI 初审曾因额度终止，但后来另一独立 final reviewer 完成了整分支审查，不要再将额度中断当成最终阻塞。
+- 非阻塞维护观察：当前全局 fetch 包装仍可影响跨源 POST / 401；未发现当前业务调用的触发证据，最终 reviewer 没有将其列为阻塞。后续扩展第三方浏览器调用时应收窄到同源或使用 helper。
+- **下一阶段是确认合并/部署方式及用户自行填写真实 Key**，不要自动将本地已通过等同线上已修复。部署必须加载新 Python 源码与 DSH profile 并重启两项服务；线上运行版本本轮没有变动。
+- 若接手时分支尚未推送，执行下面的 SSH push 命令；若已推送，不重复发布或重做实现。PR 存在时继续原 PR，不重复创建。
+
+## 技术决策（不要重做）
+
+- 复用 DSH 现成厂商目录、设置和凭据库；不另建 Key 数据库，不将 Key 放浏览器存储、URL 或响应中。
+- 原生厂商可以仅保存 Key；使用每个 provider 自己的 revision 和 settingsNs，不向 DeepSeek 根 namespace 强塞 pi-ai 字段。
+- DSH rc.6 的通用 settings RPC **刻意不开放 agent-default-model**。不能再尝试只用 settings.mutate 改它；已经有小型 `quant-model-settings` 插件，通过原生 settings service 保存并限制 loopback/Origin/header/body。
+- 自定义 HTTPS 地址禁止私网、userinfo、query/fragment；本轮没有自动模型发现或付费连通测试。
+- 默认模型只影响新会话；旧会话不静默切换。
+- 管理令牌和模型 API Key 是不同凭据。真实令牌只能用户在服务端本地通过 `python -m deck.web_security --show-token` 读取，不要把真实凭据打印到审查日志或聊天。
+- `.superpowers/sdd` 是本地忽略的详细证据目录，包含 plan briefs/reports/diff packages、后端复审报告和进度账本；在另一台机器 clone 时不会存在，需参照此文及已提交 docs。
+
+## 接手后的首个动作
+
+```sh
+git status --short
+git log -8 --oneline
+python3 -m unittest discover -s tests -v
+node --test tests/*.cjs
+```
+
+先读本说明和批准的设计，检查分支远端/PR 状态，然后推进合并或 Windows 部署；不要重复 Task 1、Task 2、最终审查或已修复的 socket 警告。
+
+## 本地验收与交付
+
+```sh
+python3 tests/run_settings_fixture.py --port 13187
+# 浏览器打开 http://127.0.0.1:13187/settings
+# 合成测试登录令牌：quant-fixture-token（不是生产凭据）
+python3 tests/run_settings_fixture.py --port 13188 --partial-key-failure
+
+git push -u origin codex/privacy-provider-settings
+```
+
+GitHub HTTPS 推送没有凭据；origin 的 push URL 已改为 SSH，`ssh -T git@github.com` 确认账户为 huiyuanaisherry，dry-run 成功。不要在输出中读取 keychain 或 token。
+
+## 文件状态
+
+| 文件 | 状态 |
+| --- | --- |
+| `.gitignore` | 已提交；测试与最终整体验收通过 |
+| `README.md` | 已提交；测试与最终整体验收通过 |
+| `config/navigation.json` | 已提交；测试与最终整体验收通过 |
+| `config/navigation.json.example` | 已提交；测试与最终整体验收通过 |
+| `config/web_security.yaml.example` | 已提交；测试与最终整体验收通过 |
+| `deck/dashboard_live.html` | 已提交；测试与最终整体验收通过 |
+| `deck/deck.html` | 已提交；测试与最终整体验收通过 |
+| `deck/deck_server.py` | 已提交；测试与最终整体验收通过 |
+| `deck/live_api.py` | 已提交；测试与最终整体验收通过 |
+| `deck/live_patch.js` | 已提交；测试与最终整体验收通过 |
+| `deck/model_settings.py` | 已提交；测试与最终整体验收通过 |
+| `deck/web_security.py` | 已提交；测试与最终整体验收通过 |
+| `"docs/API\351\205\215\347\275\256.md"` | 已提交；测试与最终整体验收通过 |
+| `docs/reviews/2026-10-25-privacy-and-provider-settings.md` | 已提交；测试与最终整体验收通过 |
+| `docs/superpowers/plans/2026-10-25-provider-settings.md` | 已提交；测试与最终整体验收通过 |
+| `docs/superpowers/specs/2026-10-25-provider-settings-design.md` | 已提交；测试与最终整体验收通过 |
+| `harness/home/profiles/web/cordis.patch.yml` | 已提交；测试与最终整体验收通过 |
+| `harness/home/profiles/web/plugins/quant-model-settings.js` | 已提交；测试与最终整体验收通过 |
+| `tests/model-settings.test.cjs` | 已提交；测试与最终整体验收通过 |
+| `tests/run_settings_fixture.py` | 已提交；测试与最终整体验收通过 |
+| `tests/test_deck_security.py` | 已提交；测试与最终整体验收通过 |
+| `tests/test_model_settings.py` | 已提交；测试与最终整体验收通过 |
+| `tests/test_quant_model_settings.cjs` | 已提交；测试与最终整体验收通过 |
+| `tests/test_settings_ui.py` | 已提交；测试与最终整体验收通过 |
+| `tests/test_web_security.py` | 已提交；测试与最终整体验收通过 |
+| `ui_v2/assets/model-settings.js` | 已提交；测试与最终整体验收通过 |
+| `ui_v2/components/decide.js` | 已提交；测试与最终整体验收通过 |
+| `ui_v2/components/sidebar.js` | 已提交；测试与最终整体验收通过 |
+| `ui_v2/core/api.js` | 已提交；测试与最终整体验收通过 |
+| `ui_v2/pages/backtest.html` | 已提交；测试与最终整体验收通过 |
+| `ui_v2/pages/control.html` | 已提交；测试与最终整体验收通过 |
+| `ui_v2/pages/factors.html` | 已提交；测试与最终整体验收通过 |
+| `ui_v2/pages/report.html` | 已提交；测试与最终整体验收通过 |
+| `ui_v2/pages/settings.html` | 已提交；测试与最终整体验收通过 |
