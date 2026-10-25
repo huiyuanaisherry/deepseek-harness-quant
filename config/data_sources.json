@@ -1,0 +1,8 @@
+{
+  "testSymbol": "000001.SZ",
+  "checks": [
+    {"id": "daily", "label": "日线行情", "api": "daily", "fields": "ts_code,trade_date,close"},
+    {"id": "adj_factor", "label": "复权因子", "api": "adj_factor", "fields": "ts_code,trade_date,adj_factor"},
+    {"id": "fina_indicator", "label": "财务指标", "api": "fina_indicator", "fields": "ts_code,ann_date,end_date,eps"}
+  ]
+}

@@ -67,6 +67,12 @@
       "label": "模型与 API",
       "ic": "cpu",
       "url": "/settings"
+    },
+    {
+      "id": "data-settings",
+      "label": "数据源配置",
+      "ic": "db",
+      "url": "/data-settings"
     }
   ]
 }

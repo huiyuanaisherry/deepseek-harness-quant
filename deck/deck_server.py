@@ -52,6 +52,7 @@ DECISIONS = LOGS / "deck_decisions.json"
 #   读-改-写（读最新 deck_decisions → append → 写新时间戳文件）存在竞争，
 #   并发审批会丢记录（实测 10 并发仅存 4 条）→ 串行化整个决策读写区
 DECIDE_LOCK = threading.Lock()
+DATA_SETTINGS_LOCK = threading.Lock()
 
 
 def _json_safe(o):
@@ -221,13 +222,31 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
     def _settings(self):
         return getattr(self.server, 'model_settings', None) or ModelSettings()
 
+    def _data_settings(self):
+        # One instance per server keeps verification cooldown/concurrency shared.
+        with DATA_SETTINGS_LOCK:
+            service = getattr(self.server, 'data_settings', None)
+            if service is None:
+                try:
+                    from .data_settings import DataSettings
+                except ImportError:
+                    from data_settings import DataSettings
+                service = DataSettings(BASE / 'config' / 'params.yaml',
+                                       metadata_path=BASE / 'config' / 'data_sources.json')
+                self.server.data_settings = service
+            return service
+
     def do_GET(self):
         if not self._gate():
             return
         try:
             path = self.path.split('?', 1)[0]
-            if path in ('/api/manual_update', '/api/export_data', '/api/live/backtest_run'):
+            if path in ('/api/manual_update', '/api/export_data', '/api/live/backtest_run', '/api/data-settings/tushare/verify'):
                 return self._error('METHOD_NOT_ALLOWED', 405)
+            if path == '/data-settings':
+                return self._v2_page('data-settings.html', 'data settings missing')
+            if path == '/api/data-settings/tushare':
+                return self._send_json(self._data_settings().describe())
             if path == '/settings':
                 return self._v2_page('settings.html', 'settings missing')
             if path == '/api/navigation':
@@ -259,6 +278,10 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
             actions = {'/api/model-settings/provider':'save',
                        '/api/model-settings/key/remove':'remove_key',
                        '/api/model-settings/default':'set_default'}
+            if path == '/api/data-settings/tushare':
+                return self._send_json(self._data_settings().save(self._read_json()))
+            if path == '/api/data-settings/tushare/verify':
+                return self._send_json(self._data_settings().verify(self._read_json()))
             if path == '/api/chat/session':
                 return self._send_json(create_chat_session(self._read_json()))
             if path in actions:

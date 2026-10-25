@@ -20,25 +20,36 @@ os.environ.setdefault("NO_PROXY", "*")  # 数据抓取不走代理，防限频/�
 import pandas as pd
 
 _PRO = None
+_PRO_CONFIG = None
 _LAST_CALL = 0.0
 _MIN_INTERVAL = 0.05  # 主服务器宽松节流（实测单次 ~1s，此值仅防手滑打爆）
 
+_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "params.yaml"
+_CFG = None
+_CFG_SIGNATURE = None
+
 
 def _load_cfg():
+    """读取 data 段；文件未变时复用上次解析结果（每次抓取都会调用）"""
+    global _CFG, _CFG_SIGNATURE
     import yaml
-    cfg = yaml.safe_load((Path(__file__).resolve().parent.parent / "config" / "params.yaml")
-                         .read_text(encoding="utf-8"))
-    return cfg["data"]
+    stat = _CONFIG_PATH.stat()
+    signature = (stat.st_mtime_ns, stat.st_size)
+    if _CFG is None or _CFG_SIGNATURE != signature:
+        _CFG = yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8"))["data"]
+        _CFG_SIGNATURE = signature
+    return _CFG
 
 
 def _pro():
     """按 params.yaml 的 token + api_url 构造 Pro 对象（带自定义 HTTP 地址）
     ★2026-08-14 超时 30s→10s：代理服务器 镜像间歇读超时（默认 30s 让单次失败等满 30s，
       重试链累加 = 整链 100s+）；10s 快速失败 + _call 重试 5 次更稳更快。"""
-    global _PRO
-    if _PRO is None:
+    global _PRO, _PRO_CONFIG
+    cfg = _load_cfg()
+    config_key = (cfg["tushare_token"], cfg.get("tushare_api_url", "https://api.tushare.pro"))
+    if _PRO is None or _PRO_CONFIG != config_key:
         import tushare as ts
-        cfg = _load_cfg()
         p = ts.pro_api(cfg["tushare_token"])
         p._DataApi__http_url = cfg.get("tushare_api_url", "https://api.tushare.pro")
         try:
@@ -46,6 +57,7 @@ def _pro():
         except Exception:
             pass
         _PRO = p
+        _PRO_CONFIG = config_key
     return _PRO
 
 

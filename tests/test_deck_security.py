@@ -56,6 +56,41 @@ class HandlerTests(unittest.TestCase):
             self.assertEqual(self.request('/api/chat/session', {})[0],200)
             create.assert_called_once_with({})
 
+    def test_data_settings_routes_are_authenticated_and_csrf_protected(self):
+        class FakeDataSettings:
+            def __init__(self):
+                self.calls=[]
+            def describe(self):
+                self.calls.append(('describe',None))
+                return {'ok':True,'revision':'v1','configured':True,'endpoint':'https://api.example.com'}
+            def save(self,body):
+                self.calls.append(('save',body))
+                return {'ok':True,'revision':'v2','configured':True}
+            def verify(self,body):
+                self.calls.append(('verify',body))
+                return {'ok':True,'revision':'v2','checks':[]}
+        service=FakeDataSettings()
+        self.server.data_settings=service
+        pages=self.root/'ui_v2'/'pages'
+        pages.mkdir()
+        (pages/'data-settings.html').write_text('DATA SETTINGS PAGE')
+        self.assertEqual(self.request('/data-settings')[0],303)
+        self.assertEqual(self.request('/api/data-settings/tushare')[0],401)
+        self.assertEqual(self.request('/api/data-settings/tushare',{})[0],401)
+        self.assertEqual(self.request('/api/data-settings/tushare/verify',{})[0],401)
+        self.assertEqual(service.calls,[])
+        self.login()
+        self.assertEqual(self.request('/data-settings')[:2],(200,b'DATA SETTINGS PAGE'))
+        self.assertEqual(self.request('/api/data-settings/tushare')[0],200)
+        for path in ['/api/data-settings/tushare','/api/data-settings/tushare/verify']:
+            self.assertEqual(self.request(path,{},origin=False)[0],403)
+        self.assertEqual(len(service.calls),1)
+        body={'expectedRevision':'v1','endpoint':'https://api.example.com','token':'synthetic-token','allowInsecureHttp':False}
+        self.assertEqual(self.request('/api/data-settings/tushare',body)[0],200)
+        self.assertEqual(self.request('/api/data-settings/tushare/verify',{'expectedRevision':'v2'})[0],200)
+        self.assertEqual(service.calls[1:], [('save',body),('verify',{'expectedRevision':'v2'})])
+        self.assertEqual(self.request('/api/data-settings/tushare/verify')[0],405)
+
     def test_real_handler_containment_after_login(self):
         self.login()
         for path in ['/dl//' + str(self.secret), '/v2//' + str(self.secret), '/dl/../private', '/dl/%2e%2e/private', '/dl/link', '/v2/%2f' + str(self.secret)]:

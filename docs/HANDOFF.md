@@ -150,10 +150,19 @@ GitHub HTTPS 推送没有凭据；origin 的 push URL 已改为 SSH，`ssh -T gi
 
 ## 真实数据抽样接入（2026-10-25，尚未切换网页）
 
-- 用户询问 Tushare Token 位置及少量真实数据如何隔离验证。Token 由 `data/fetcher_tushare.py` 从 `config/params.yaml` 的 `data.tushare_token` 读取，`data.tushare_api_url` 应为实际接口地址；网页「模型与 API」目前仅管模型厂商凭据，没有 Tushare 配置表单。远端 params.yaml 存在，未读取/打印其 Token，也未改动。
+- 用户询问 Tushare Token 位置及少量真实数据如何隔离验证。Token 由 `data/fetcher_tushare.py` 从 `config/params.yaml` 的 `data.tushare_token` 读取，`data.tushare_api_url` 应为实际接口地址。现已提供同源 `/data-settings` 页面管理这两项及 HTTP 确认开关；说明见 [API配置](API配置.md#数据源配置tushare)。远端 params.yaml 存在，未读取/打印其 Token，也未改动。
 - WSL 已安装 baostock / akshare / tushare。本轮先验证无个人 Token 的 BaoStock，串行少量请求，不启动全市场更新。
 - 成功目录：生产项目下 `data/real-smoke/20261025-161826/`。SQLite bars.db 含 000001.SZ、600519.SH 两只测试样本各 260 个交易日 × none/qfq 两种复权，共1040条；最新2026-10-23。仅用作连接/字段测试，不是选股建议。
 - 同目录每只股票有 basic.csv、profit.csv（2026Q2）；检查了发布日不晚于当日。verification.json 记录 ok:true、demo_unchanged:true。这里只验证部分财务指标，不代表已取得全量财报或完整 PIT 验收。
 - 初次尝试目录 `data/real-smoke/20261025-161708/` 保留失败记录。传 DailyCache 相对 db_path 时，其 _ro_uri 调 Path.as_uri 抛 ValueError 被读取函数吞掉，表现为 get_daily=None；调整调用方为显式绝对路径后成功。本轮没有修改 DailyCache 源码。
 - data/demo/bars.db 大小/mtime前后相同；没有改动 systemd Environment，也没有重启或切换生产网页。网页仍使用 data/demo。
 - 下一步依赖用户自行在服务端配置 Tushare Token；只需回复「已配置」，不要让其把 Token 发聊天。之后验证官方接口权限，使用独立目录补全数据与质量校验，再处理旧脚本写死 data/cache 的路径、全市场覆盖/候选池/日报产出，最后才能考虑切换网页与定时任务。
+
+## Tushare 数据源配置页（2026-10-25，本地完成，未部署）
+
+- 新增 `deck/data_settings.py`、`config/data_sources.json(.example)`、`/data-settings` 页面与 `/api/data-settings/tushare` 保存/验证接口，`config/navigation.json` 动态菜单与「模型与 API」页互相链接。只读写 `params.yaml` 的 `data.tushare_*` 三项，不改动其他配置键。
+- 安全规则：登录 + 精确 Origin + `X-Quant-Request: 1`；Token 不回显、不进浏览器存储或日志；首配或换址必须新 Token；HTTP 需显式确认；DNS 仅允许公网并固定连接 IP，HTTPS 保留 SNI/证书校验，不跟随重定向、不走系统代理，含总时限与响应体上限；配置文件 SHA-256 作版本号，`tempfile` + `fsync` + `os.replace` 原子写入，POSIX 0600 / Windows icacls ACL。
+- 验证只对已保存版本串行请求 `daily`/`adj_factor`/`fina_indicator` 小样本，逐接口返回可用/无数据/凭据/权限/限流/网络/错误；进程级单次并发与冷却，未真正发起上游请求不消耗冷却。验证结果不代表全部权限，也不下载或切换数据。
+- 页面显示数据模式（`LWQUANT_CACHE_DIR` > `data.cache_dir` > 默认 `data/cache`，含 demo 段时提示演示数据），说明保存/验证不会切换目录。
+- 验证：Python 53 项、Node 31 项、`py_compile`/`node --check` 全过；外部 Chrome 合成 fixture 已逐项验收（首配缺 Token、保存、三项验证、换址缺 Token、HTTP 未确认、确认后保存、刷新清空），截图留存但未提交。
+- 尚未推送 PR，未部署 Windows，未读取或写入真实 Token，也未发起真实 Pro 请求。fixture 进程已停止。
