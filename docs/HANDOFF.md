@@ -147,3 +147,13 @@ GitHub HTTPS 推送没有凭据；origin 的 push URL 已改为 SSH，`ssh -T gi
 - 最后一次全量验证：本地及 WSL 26 Python + 20 Node 全过；后续仅一行提醒过滤调整，其 4 项桥接测试在两端通过，独立审查批准。
 - 截图 `/tmp/quant-moark-real-reply.png`；Chrome 用户标签页 1660697005 保持 /control、已登录。管理令牌经仅内存/FIFO 方式复用，未输出日志、未落普通文件，FIFO 已删除；服务商 Key 未读取/修改。
 - 生产目录仍以 data/demo 运行。真实模型连通成功不代表真实行情、运行快照或交易链路全部验收。当前没有额外待发模型请求。
+
+## 真实数据抽样接入（2026-10-25，尚未切换网页）
+
+- 用户询问 Tushare Token 位置及少量真实数据如何隔离验证。Token 由 `data/fetcher_tushare.py` 从 `config/params.yaml` 的 `data.tushare_token` 读取，`data.tushare_api_url` 应为实际接口地址；网页「模型与 API」目前仅管模型厂商凭据，没有 Tushare 配置表单。远端 params.yaml 存在，未读取/打印其 Token，也未改动。
+- WSL 已安装 baostock / akshare / tushare。本轮先验证无个人 Token 的 BaoStock，串行少量请求，不启动全市场更新。
+- 成功目录：生产项目下 `data/real-smoke/20261025-161826/`。SQLite bars.db 含 000001.SZ、600519.SH 两只测试样本各 260 个交易日 × none/qfq 两种复权，共1040条；最新2026-10-23。仅用作连接/字段测试，不是选股建议。
+- 同目录每只股票有 basic.csv、profit.csv（2026Q2）；检查了发布日不晚于当日。verification.json 记录 ok:true、demo_unchanged:true。这里只验证部分财务指标，不代表已取得全量财报或完整 PIT 验收。
+- 初次尝试目录 `data/real-smoke/20261025-161708/` 保留失败记录。传 DailyCache 相对 db_path 时，其 _ro_uri 调 Path.as_uri 抛 ValueError 被读取函数吞掉，表现为 get_daily=None；调整调用方为显式绝对路径后成功。本轮没有修改 DailyCache 源码。
+- data/demo/bars.db 大小/mtime前后相同；没有改动 systemd Environment，也没有重启或切换生产网页。网页仍使用 data/demo。
+- 下一步依赖用户自行在服务端配置 Tushare Token；只需回复「已配置」，不要让其把 Token 发聊天。之后验证官方接口权限，使用独立目录补全数据与质量校验，再处理旧脚本写死 data/cache 的路径、全市场覆盖/候选池/日报产出，最后才能考虑切换网页与定时任务。
