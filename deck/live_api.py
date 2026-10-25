@@ -3214,11 +3214,11 @@ _ENDPOINTS = [
 ]
 
 
-def _probe_one(path: str, port: int = 8787) -> dict:
+def _probe_one(path: str, port: int = 8787, cookie: str = "") -> dict:
     import urllib.request as _ur, time as _t
     _st = _t.time()
     try:
-        with _ur.urlopen(f"http://127.0.0.1:{port}{path}", timeout=25) as _r:
+        with _ur.urlopen(_ur.Request(f"http://127.0.0.1:{port}{path}", headers={"Cookie": cookie}), timeout=25) as _r:
             _ms = int((_t.time() - _st) * 1000)
             return {"path": path, "status": _r.status, "ms": _ms, "ok": _r.status == 200}
     except Exception as _e:
@@ -3227,7 +3227,7 @@ def _probe_one(path: str, port: int = 8787) -> dict:
                 "error": str(_e)[:80]}
 
 
-def live_endpoints() -> dict:
+def live_endpoints(cookie: str = "", port: int = 8787) -> dict:
     """全部 API 端点状态：先 warm 重端点缓存（避免冷缓存并发挤压误报超时）→
     并发探测 + 120s 缓存。ok_count / total / 每端点 status+ms。
     失败端点保留上次成功状态（stale 标记），避免偶发网络抖动全屏红。"""
@@ -3252,7 +3252,7 @@ def live_endpoints() -> dict:
     try:
         from concurrent.futures import ThreadPoolExecutor as _TPE
         with _TPE(max_workers=8) as _ex:
-            _results = list(_ex.map(_probe_one, _ENDPOINTS))
+            _results = list(_ex.map(lambda path: _probe_one(path, port, cookie), _ENDPOINTS))
         _ok = [r for r in _results if r.get("ok")]
         # 失败端点 → 保留上次状态（若曾有）
         _prev = {e["path"]: e for e in (_ep_cache["data"] or {}).get("endpoints", [])}

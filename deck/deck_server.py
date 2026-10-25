@@ -174,12 +174,17 @@ def _resolve_route(path: str) -> Path:
 
 
 
-class Handler(BaseHTTPRequestHandler):
+try:
+    from .web_security import SecurityMixin, contained_path
+    from .model_settings import ModelSettings, DSHClient, SettingsError, proxy_quant
+except ImportError:  # Direct launcher: python deck/deck_server.py
+    from web_security import SecurityMixin, contained_path
+    from model_settings import ModelSettings, DSHClient, SettingsError, proxy_quant
+
+
+class Handler(SecurityMixin, BaseHTTPRequestHandler):
     # ★2026-08-10 个股检测缓存（类变量：跨请求共享；每请求实例会重置实例属性）
     _sc_cache = {}
-
-    def log_message(self, fmt, *args):
-        sys.stderr.write(f"[deck] {self.address_string()} {fmt % args}\n")
 
     def _send(self, code: int, body: bytes, ctype: str = "application/json"):
         try:
@@ -213,13 +218,49 @@ class Handler(BaseHTTPRequestHandler):
         f = BASE / "ui_v2" / "pages" / name
         return self._send(200, f.read_bytes() if f.exists() else missing_txt.encode("utf-8"), "text/html; charset=utf-8")
 
-    def _read_json(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n <= 0:
-            return {}
-        return json.loads(self.rfile.read(n).decode("utf-8"))
+    def _settings(self):
+        return getattr(self.server, 'model_settings', None) or ModelSettings()
 
     def do_GET(self):
+        if not self._gate():
+            return
+        try:
+            path = self.path.split('?', 1)[0]
+            if path == '/settings':
+                return self._v2_page('settings.html', 'settings missing')
+            if path == '/api/model-settings':
+                return self._send_json(self._settings().describe())
+            if path.startswith('/api/proxy/'):
+                return self._send_json(proxy_quant(self.path, 'GET'))
+            return self._private_GET()
+        except SettingsError as error:
+            return self._error(error.code, error.status)
+        except (ValueError, UnicodeError):
+            return self._error('INVALID_PATH', 400)
+        except Exception:
+            return self._error('REQUEST_FAILED', 500)
+
+    def do_POST(self):
+        if not self._gate(write=True):
+            return
+        try:
+            path = self.path.split('?', 1)[0]
+            actions = {'/api/model-settings/provider':'save',
+                       '/api/model-settings/key/remove':'remove_key',
+                       '/api/model-settings/default':'set_default'}
+            if path in actions:
+                return self._send_json(getattr(self._settings(), actions[path])(self._read_json()))
+            if path.startswith('/api/proxy/'):
+                return self._send_json(proxy_quant(self.path, 'POST', self._read_json()))
+            return self._private_POST()
+        except SettingsError as error:
+            return self._error(error.code, error.status)
+        except (ValueError, UnicodeError):
+            return self._error('INVALID_REQUEST', 400)
+        except Exception:
+            return self._error('REQUEST_FAILED', 500)
+
+    def _private_GET(self):
         path = self.path.split("?")[0]
         if path == "/api/portfolio":     # ★T-2：持仓（strategy/portfolio.py）
             try:
@@ -323,31 +364,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": True, "skills": skills, "presets": presets})
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 500)
-        if path.startswith("/api/proxy/"):   # ★2026-08-16 反向代理 GET → :3080 HARNESS（前端同源访问，零跨源）
-            import urllib.request as _ur
-            import urllib.error as _ue
-            _tgt = "http://127.0.0.1:3080/" + path[len("/api/proxy/"):]
-            if "?" in self.path:
-                _tgt += "?" + self.path.split("?", 1)[1]
-            try:
-                _r = _ur.urlopen(_ur.Request(_tgt), timeout=40)
-                _data = _r.read()
-                try:
-                    return self._send_json(json.loads(_data.decode("utf-8")))
-                except Exception:
-                    self.send_response(_r.status)
-                    self.send_header("Content-Type", _r.headers.get("Content-Type", "application/json"))
-                    self.end_headers()
-                    self.wfile.write(_data)
-                    return
-            except _ue.HTTPError as e:
-                _d = e.read()
-                try:
-                    return self._send_json(json.loads(_d.decode("utf-8")), e.code)
-                except Exception:
-                    return self._send_json({"ok": False, "error": "proxy upstream " + str(e.code)}, e.code)
-            except Exception as e:
-                return self._send_json({"ok": False, "error": "proxy: " + str(e)}, 502)
+
         if path == "/api/subj_quant":   # ★2026-08-14 主观量化融合系统状态（标签+否决+胜率徽章）
             try:
                 sys.path.insert(0, str(BASE))
@@ -529,8 +546,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v2" or path == "/v2/":   # ★#366 旧骨架页 → 301 门户（index.html 是"V2 建设中"历史残留，主入口已切 /）
             return self._redirect("/")
         if path.startswith("/v2/"):   # ★2026-08-13 UI v2 静态路由（ui_v2/ 目录——API 驱动静态页，无生成器机制）
-            _rel = path[len("/v2/"):].replace("..", "")
-            f = BASE / "ui_v2" / _rel
+            _rel = path[len("/v2/"):]
+            f = contained_path(BASE / "ui_v2", _rel)
             if f.is_file():
                 _ct = "text/css; charset=utf-8" if _rel.endswith(".css") else (
                     "application/javascript; charset=utf-8" if _rel.endswith(".js") else "text/html; charset=utf-8")
@@ -607,6 +624,8 @@ class Handler(BaseHTTPRequestHandler):
                       "turnlow_top": live_api.live_turnlow_top,   # ★2026-08-15 turn_low 防守主力参考
                       "wufu_rotation": live_api.live_wufu_rotation,   # ★2026-08-16 五福轮动门户摆件
                       "chain_refresh": live_api.live_chain_refresh}[_fn]
+                if _fn == 'endpoints':
+                    return self._send_json(fn(cookie=self.headers.get('Cookie', ''), port=self.server.server_port))
                 return self._send_json(fn())
             except Exception as e:
                 # ★2026-08-14 调试：live API 500 打印完整堆栈（排查 float-datetime）
@@ -637,7 +656,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"error": str(e)}, 500)
         if path.startswith("/dl/"):   # ★2026-08-12 #179：导出文件下载（/dl/data_export_xxx.xlsx）
             _name = path.split("/", 2)[2]
-            _fp = BASE / "output" / _name
+            _fp = contained_path(BASE / "output", _name)
             if _fp.exists():
                 _ct = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"                     if _name.endswith(".xlsx") else "text/html; charset=utf-8"
                 return self._send(200, _fp.read_bytes(), _ct)
@@ -749,34 +768,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"error": str(e)}, 500)
         return self._send_json({"error": f"未知路由 {path}"}, 404)
 
-    def do_POST(self):
+    def _private_POST(self):
         path = self.path.split("?")[0]
-        if path.startswith("/api/proxy/"):   # ★2026-08-16 反向代理 POST → :3080（删除/批量/清空/发送全走这里）
-            import urllib.request as _ur
-            import urllib.error as _ue
-            _tgt = "http://127.0.0.1:3080/" + path[len("/api/proxy/"):]
-            try:
-                _body = self._read_json()
-                _req = _ur.Request(_tgt, data=json.dumps(_body).encode("utf-8"),
-                                   headers={"Content-Type": "application/json"})
-                _r = _ur.urlopen(_req, timeout=60)
-                _data = _r.read()
-                try:
-                    return self._send_json(json.loads(_data.decode("utf-8")))
-                except Exception:
-                    self.send_response(_r.status)
-                    self.send_header("Content-Type", _r.headers.get("Content-Type", "application/json"))
-                    self.end_headers()
-                    self.wfile.write(_data)
-                    return
-            except _ue.HTTPError as e:
-                _d = e.read()
-                try:
-                    return self._send_json(json.loads(_d.decode("utf-8")), e.code)
-                except Exception:
-                    return self._send_json({"ok": False, "error": "proxy upstream " + str(e.code)}, e.code)
-            except Exception as e:
-                return self._send_json({"ok": False, "error": "proxy: " + str(e)}, 502)
         if path == "/api/import/install":   # ★2026-08-16 导入 skill / agent 预设（assets → 运行库）
             try:
                 rec = self._read_json()

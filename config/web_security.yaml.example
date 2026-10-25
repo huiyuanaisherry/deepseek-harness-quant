@@ -1,0 +1,6 @@
+{
+  "session_ttl_seconds": 28800,
+  "login_window_seconds": 300,
+  "login_attempts": 5,
+  "max_body_bytes": 65536
+}
