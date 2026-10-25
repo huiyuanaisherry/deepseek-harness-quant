@@ -52,6 +52,14 @@ class SettingsTests(unittest.TestCase):
 
 
 class TransportTests(unittest.TestCase):
+    def test_rejected_redirect_closes_the_upstream_response(self):
+        import io
+        from deck.model_settings import NoRedirect
+        response = io.BytesIO(b'untrusted upstream response')
+        with self.assertRaises(SettingsError):
+            NoRedirect().redirect_request(None, response, 302, 'Found', {}, 'https://example.com')
+        self.assertTrue(response.closed)
+
     def test_real_http_envelope_and_safe_errors(self):
         import json
         import threading

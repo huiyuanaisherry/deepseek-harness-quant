@@ -37,7 +37,8 @@ def validate_endpoint(url):
 
 
 class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        fp.close()
         raise SettingsError()
 
 
@@ -63,6 +64,7 @@ class DSHClient:
                     raise SettingsError()
                 return json.loads(raw)
         except HTTPError as error:
+            error.close()
             if path == '/quant/model-default' and error.code == 409:
                 raise SettingsError('REVISION_CONFLICT', 409) from None
             raise SettingsError() from None
