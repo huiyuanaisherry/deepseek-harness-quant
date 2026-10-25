@@ -1,12 +1,12 @@
 # 接手说明：隐私修复与多厂商 Key 配置
 
-## 当前状态
+## 当前状态（最终更新：2026-10-25）
 
-用户已批准推荐方案，并授权在 `huiyuanaisherry/deepseek-harness-quant` 修改。
-分支：`codex/privacy-provider-settings`；上游/用户 fork 基线均为 `9f72ab7`。
-最新功能代码提交：`b067c0a`（后续交接文档提交不改变代码）。尚未合并 master，也没有更新 Windows 生产服务。
+用户授权的 fork 分支为 `codex/privacy-provider-settings`，草稿 PR 为 https://github.com/huiyuanaisherry/deepseek-harness-quant/pull/1 。未合并 master。
 
-功能实现、最终独立审查和修复后的 Chrome 复验均已完成；交付至用户 fork 分支。**尚未部署到 Windows 生产服务，也未合并 master。**
+**Windows 已部署至功能提交 `74ed001f0bc70987757892911b97dde050b527ad`。Mac Chrome 真实模型测试已收到「连接成功」，刷新后记录仍在。** 当前默认为用户配置的 moark / DeepSeek-V4.1-Flash-1017，模型 Key 未被读取或修改。
+
+26 项 Python + 20 项 Node 测试通过，独立审查通过。下文保留之前各阶段记录；遇到「尚未部署」「尚未验证模型回复」等旧描述，以本节和文末最新验收为准。后续 agent 无需重做部署/隐私审查/模型测试；按新的具体反馈继续。
 
 ## 已完成和证据
 
@@ -134,3 +134,16 @@ GitHub HTTPS 推送没有凭据；origin 的 push URL 已改为 SSH，`ssh -T gi
 - 线上验收：认证后 control HTML 存在新按钮；POST 成功创建一个空主会话，桥接列表可见且 recent 消息为 []。未调用模型，未读取厂商 Key；临时测试登录会话已撤销。
 - 用户浏览器因 Python 重启需使用原管理令牌重新登录，再打开 /control 选中主会话发送连接测试。目前仍没有实际模型回复证据，不能宣称模力方舟 Key 连通已验证。
 - 另见控制页旧快照卡 `/api/harness` 返回404，和会话/模型调用不同；本轮未扩展快照功能。截图 `/tmp/quant-session-fix-login.png` 为部署后重新登录页。
+
+## Chrome 真实模型调用与显示修复（2026-10-25，最终验收）
+
+- 浏览器实测发现：内部工作区/技能说明被渲染为 user 消息；请求实际失败，但页面一直等待。原生 history 的 turn/end 错误码为 `UNSUPPORTED_REASONING_EFFORT`。
+- 根因：原始 settings 中的 `reasoningEffort:max` 在切换自定义模型时被保留；当前模型无该能力元数据。`3314d9d` 默认模型写入同时 unset 这一模型所属字段，由新模型默认能力决定；已在 Chrome 对用户当前同一模型再次点「设为新会话默认」，未换模型或 Key。
+- 桥接返回安全 turn 状态/固定错误码及 requestId，不泄露原始错误；根会话生成 UUID、牛散 followup 使用原生 MessageId；状态保留 requestId，不依赖最多 30 条的可见消息窗口。UI 等 turn idle 才判成功，错误立即结束等待，旧回复不被误认为新回复。
+- 审查发现满 30 条消息时计数关联失效，已增加回归并修正；独立复审通过。提醒消息实际 source.kind 为 agent-instructions / skill-catalog / plugin，`74ed001` 只显示显式 user 来源或旧版无 source 的 user 消息，以及 assistant 消息。
+- 运行快照未生成时显示明确空状态，不再将可选快照 404 显示为聊天连接故障。
+- Chrome 按真实页面操作：登录 → 模型设置 → 保存同一默认模型 → 控制 → 新建会话 → 发送「你好，请只回复“连接成功”，不要调用工具。」 → 收到真实 assistant「连接成功」及「✓ 已回复」。原生 session.models 确认当前 moark 模型无显式 reasoningEffort。
+- 清理最后两类提醒后只重启 DSH，使用原生 session.create 的 sessionId 恢复刚完成的测试会话，没有再次发模型请求；刷新 Chrome 后仅两条聊天消息，实际回复保留。原生 history 没有 tool/ 调用事件。
+- 最后一次全量验证：本地及 WSL 26 Python + 20 Node 全过；后续仅一行提醒过滤调整，其 4 项桥接测试在两端通过，独立审查批准。
+- 截图 `/tmp/quant-moark-real-reply.png`；Chrome 用户标签页 1660697005 保持 /control、已登录。管理令牌经仅内存/FIFO 方式复用，未输出日志、未落普通文件，FIFO 已删除；服务商 Key 未读取/修改。
+- 生产目录仍以 data/demo 运行。真实模型连通成功不代表真实行情、运行快照或交易链路全部验收。当前没有额外待发模型请求。
