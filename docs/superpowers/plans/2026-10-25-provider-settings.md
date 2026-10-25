@@ -54,3 +54,12 @@
 - [ ] Verify no admin token, Key, machine-specific deployment config or sensitive test artifact is tracked. Compare source against approved spec.
 - [ ] Push `codex/privacy-provider-settings` to origin. Create a reviewable PR if authentication permits and attach it to the chat; otherwise report exact push/PR blocker without claiming publication.
 - [ ] Report source privacy findings, verified behavior, test results, fork/PR link and production deployment status. Do not modify the live server as part of fork-only editing.
+
+### Task 1 compatibility addendum (real rc.6 contract validation)
+
+- [x] Verify the default-model namespace against an isolated real rc.6 runtime; confirm its omission is the generic RPC exposure allowlist, not missing registration.
+- [x] Add `harness/home/profiles/web/plugins/quant-model-settings.js` as a separate profile plugin and route only `/quant/model-default` into native settings/currentSelection.
+- [x] Require loopback peer/Host and exact Origin/custom header for reads and writes; bound JSON to 4096 bytes and preserve native optimistic revisions.
+- [x] Map only explicit Python internal operations `quant.defaults.describe/mutate` to this route; retain facade model-catalog validation.
+- [x] Add Node fixture tests for projection/native path ops, conflict, access checks and body bounds, plus Python transport/facade regressions.
+- [x] Exercise profile save/fake credential/default switch in isolated runtime, restore original default, remove fixture Key/profile; no paid/model/discovery call.

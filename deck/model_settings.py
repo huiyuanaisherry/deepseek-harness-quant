@@ -6,6 +6,7 @@ import re
 import socket
 import uuid
 from urllib.parse import urlsplit
+from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 PROTOCOLS = ['openai-completions', 'openai-responses', 'anthropic-messages']
@@ -55,16 +56,29 @@ class DSHClient:
 
     def request(self, path, data=None):
         try:
-            request = Request(self.base + path, data=data, headers={'Content-Type':'application/json'})
+            request = Request(self.base + path, data=data, headers={'Content-Type':'application/json', 'Origin':self.base, 'X-Quant-Request':'1'})
             with self.opener.open(request, timeout=10) as response:
                 raw = response.read(MAX_RESPONSE + 1)
                 if len(raw) > MAX_RESPONSE:
                     raise SettingsError()
                 return json.loads(raw)
+        except HTTPError as error:
+            if path == '/quant/model-default' and error.code == 409:
+                raise SettingsError('REVISION_CONFLICT', 409) from None
+            raise SettingsError() from None
         except Exception:
             raise SettingsError() from None
 
     def __call__(self, method, payload):
+        if method in ('quant.defaults.describe', 'quant.defaults.mutate'):
+            data = json.dumps(payload).encode() if method.endswith('.mutate') else None
+            result = self.request('/quant/model-default', data)
+            if not isinstance(result, dict) or result.get('ok') is not True or type(result.get('revision')) is not int:
+                raise SettingsError()
+            selection = result.get('defaultModel')
+            if not isinstance(selection, dict) or not all(text(selection.get(k)) for k in ('provider','model')):
+                raise SettingsError()
+            return {'ok':True, 'defaultModel':{k:selection[k] for k in ('provider','model')}, 'revision':result['revision']}
         rpc_id = str(uuid.uuid4())
         result = self.request('/api/' + method, json.dumps({'type':'client-request','rpcId':rpc_id,'method':method,'payload':payload}).encode())
         if not isinstance(result, dict) or result.get('rpcId') != rpc_id or result.get('type') != 'server-response':
@@ -152,8 +166,8 @@ class ModelSettings:
                               'profile':safe, 'revision':namespaces.get(entry['settingsNs'], {}).get('revision'),
                               'credential':{'configured':credential.get('configured') is True, 'writable':credential.get('writable') is True,
                                             **({'source':source} if source in ('store','env','environment','credentials','file','memory','settings') else {})}})
-        defaults = namespaces.get('agent-default-model', {})
-        value = defaults.get('value', {})
+        defaults = self.rpc('quant.defaults.describe', {})
+        value = defaults.get('defaultModel', {})
         return {'ok':True, 'providers':providers, 'revision':namespaces.get('llm-pi-ai', {}).get('revision'),
                 'defaultRevision':defaults.get('revision'), 'defaultModel':{k:value[k] for k in ('provider','model') if text(value.get(k))}, 'protocols':PROTOCOLS}
 
@@ -231,9 +245,9 @@ class ModelSettings:
         model = body.get('model')
         if not entry or not text(model) or model not in [m['id'] for m in models(profile.get('models', entry.get('models', [])))]:
             raise SettingsError('INVALID_MODEL', 400)
-        expected = self._revision(body, namespaces.get('agent-default-model', {}))
-        result = self.rpc('settings.mutate', {'ns':'agent-default-model', 'expectedRevision':expected,
-                                            'ops':[{'op':'set','path':[k],'value':body[k]} for k in ('provider','model')]})
+        defaults = self.rpc('quant.defaults.describe', {})
+        expected = self._revision(body, defaults)
+        result = self.rpc('quant.defaults.mutate', {'provider':body['provider'],'model':model,'expectedRevision':expected})
         return {'ok':True,'defaultRevision':result.get('revision')}
 
 

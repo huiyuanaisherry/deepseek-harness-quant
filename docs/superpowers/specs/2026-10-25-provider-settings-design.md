@@ -19,3 +19,9 @@ Restrict `/api/proxy/*` to the quant bridge routes actually needed by the contro
 ## Verification and deliverable
 
 Use Python stdlib unittest and local fake DSH HTTP endpoints. Cover traversal/symlink escape, unauthenticated reads and writes, exact Origin checks, login/logout/expiry/rate limits, body bounds, catalog shape, provider update preservation, conflicts, partial failures, Key non-disclosure and custom endpoint rejection. No real API keys or billable calls. Review Python and JavaScript changes independently, run UI verification in Chrome against a local fake runtime, push a reviewable branch/PR to the user's fork. Production deployment is a separate step after the code is reviewable.
+
+## rc.6 default-model compatibility
+
+Validation against an isolated rc.6 runtime showed that `settings.describe/mutate` deliberately excludes `agent-default-model` from the configuration-client namespace allowlist. The native service is mounted and persists correctly; the generic RPC boundary cannot reach it. A small repository-owned `quant-model-settings` profile plugin therefore exposes only GET/POST `/quant/model-default`, reading the native current selection and namespace revision and calling native `settings.mutate` for the two owned provider/model fields. It introduces no persistence store or generic RPC tunnel and preserves reasoning settings.
+
+Both internal methods require a loopback peer, literal loopback Host, exact `Origin: http://<Host>` and `X-Quant-Request: 1`; writes accept at most 4096 bytes of JSON. The authenticated Python facade validates the selected model against the native local catalog before invoking the compatibility write. It supplies the internal headers and projects only provider/model/revision. Raw errors and unrelated native settings remain private. This preserves DSH as the sole default-model persistence owner without changing dependencies or switching an existing session.

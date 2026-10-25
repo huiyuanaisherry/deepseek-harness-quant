@@ -10,6 +10,10 @@ class Fake:
         self.fail_key = False
     def __call__(self, method, payload):
         self.calls.append((method, copy.deepcopy(payload)))
+        if method == 'quant.defaults.describe':
+            return {'ok':True,'defaultModel':{'provider':'mock','model':'mock-model'},'revision':2}
+        if method == 'quant.defaults.mutate':
+            return {'ok':True,'defaultModel':{'provider':payload['provider'],'model':payload['model']},'revision':3}
         if method == 'llm.providers':
             return {'providers': [{'provider':'mock','displayName':'Mock','settingsNs':'llm-pi-ai','settingsPath':['providers','mock']}]}
         if method == 'settings.describe':
@@ -108,8 +112,7 @@ class MutationTests(unittest.TestCase):
         service.remove_key({'provider':'mock','ref':'ATTACKER_REF'})
         self.assertEqual(fake.calls[-1], ('credentials.unset', {'ref':'MOCK_API_KEY'}))
         service.set_default({'provider':'mock','model':'mock-model','expectedRevision':2})
-        self.assertEqual(fake.calls[-1][1]['ns'], 'agent-default-model')
-        self.assertEqual([op['path'] for op in fake.calls[-1][1]['ops']], [['provider'],['model']])
+        self.assertEqual(fake.calls[-1], ('quant.defaults.mutate', {'provider':'mock','model':'mock-model','expectedRevision':2}))
         with self.assertRaises(SettingsError):
             service.set_default({'provider':'mock','model':'wrong','expectedRevision':2})
     def test_blank_key_preserved_and_unknown_fields_ignored(self):
@@ -147,3 +150,19 @@ class MutationTests(unittest.TestCase):
                 self.assertEqual(error.exception.code, 'UPSTREAM_ERROR')
                 self.assertEqual(error.exception.status, 502)
                 self.assertNotIn('FAKE_SECRET', str(error.exception))
+
+    def test_compatibility_defaults_transport_mapping_and_validation(self):
+        from deck.model_settings import DSHClient
+        from unittest.mock import patch
+        client = DSHClient()
+        value = {'ok':True,'defaultModel':{'provider':'mock','model':'one'},'revision':3}
+        with patch.object(client, 'request', return_value=value) as request:
+            self.assertEqual(client('quant.defaults.describe', {}), value)
+            request.assert_called_once_with('/quant/model-default', None)
+        with patch.object(client, 'request', return_value=value) as request:
+            client('quant.defaults.mutate', {'provider':'mock','model':'one','expectedRevision':2})
+            self.assertEqual(request.call_args.args[0], '/quant/model-default')
+            self.assertEqual(__import__('json').loads(request.call_args.args[1]), {'provider':'mock','model':'one','expectedRevision':2})
+        for malformed in ({'ok':True}, {'ok':True,'defaultModel':{},'revision':3}, {'ok':False,'error':'FAKE_SECRET'}):
+            with patch.object(client, 'request', return_value=malformed), self.assertRaises(SettingsError):
+                client('quant.defaults.describe', {})
