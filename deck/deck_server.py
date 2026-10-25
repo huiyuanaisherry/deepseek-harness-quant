@@ -230,6 +230,15 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
                 return self._error('METHOD_NOT_ALLOWED', 405)
             if path == '/settings':
                 return self._v2_page('settings.html', 'settings missing')
+            if path == '/api/navigation':
+                config = BASE / 'config' / 'navigation.json'
+                if not config.exists():
+                    config = BASE / 'config' / 'navigation.json.example'
+                value = json.loads(config.read_text(encoding='utf-8')) if config.exists() else {}
+                result = {}
+                for group in ('items', 'more'):
+                    result[group] = [{k: row[k] for k in ('id', 'label', 'ic', 'url')} for row in value.get(group, []) if isinstance(row, dict) and all(isinstance(row.get(k), str) for k in ('id', 'label', 'ic', 'url')) and row['url'].startswith('/') and not row['url'].startswith('//') and not any(c in row['url'] for c in ('\\', '\r', '\n'))]
+                return self._send_json(result)
             if path == '/api/model-settings':
                 return self._send_json(self._settings().describe())
             if path.startswith('/api/proxy/'):

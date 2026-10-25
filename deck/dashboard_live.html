@@ -77,6 +77,19 @@ td { padding:6px 8px; border-bottom:1px solid #14293f; font-size:12px; }
 <div class="footer">DeepSeek HARNESS Quant · 实时监控 · 数据源 /api/system_live</div>
 </div>
 <script>
+  var nativeFetch = window.fetch.bind(window);
+  window.fetch = function (url, options) {
+    options = Object.assign({credentials:'same-origin'}, options || {});
+    if (String(options.method || 'GET').toUpperCase() === 'POST') {
+      var headers = new Headers(options.headers || {}); headers.set('X-Quant-Request','1');
+      options.headers = headers;
+    }
+    return nativeFetch(url, options).then(function (response) {
+      if (response.status === 401) { window.location.assign('/login'); throw new Error('登录已过期'); }
+      return response;
+    });
+  };
+
 let lastLogs = [];
 async function refresh() {
   try {
@@ -153,7 +166,7 @@ async function manualUpdate() {
   btn.disabled = true;
   btn.textContent = '启动中…';
   try {
-    const r = await fetch('/api/manual_update', { method: 'POST' });
+    const r = await fetch('/api/manual_update', { method: 'POST', headers:{'Content-Type':'application/json','X-Quant-Request':'1'}, body:'{}' });
     const d = await r.json();
     if (d.ok) {
       document.getElementById('mu-status').innerHTML = '<b style="color:#185FA5">🚀 已启动（' + d.ts + '）</b><span class="mini"> ' + d.note + '</span>';

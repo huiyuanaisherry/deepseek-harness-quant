@@ -232,7 +232,7 @@
       '&start=' + encodeURIComponent(document.getElementById('bt-start').value) +
       '&end=' + encodeURIComponent(document.getElementById('bt-end').value);
     document.getElementById('bt-result').innerHTML = '<div class="mini" style="opacity:.7;padding:16px 0">回测运行中…（首次加载数据约 5-15s，勿重复点击）</div>';
-    LW.api.get('/api/live/backtest_run?' + q, { timeout: 180000 }).then(function (d) {
+    LW.api.post('/api/live/backtest_run?' + q, {}, { timeout: 180000 }).then(function (d) {
       if (!d.ok) { document.getElementById('bt-result').innerHTML = '<div class="mini" style="color:var(--red)">失败：' + (d.error || '未知') + '</div>'; return; }
       renderResult(d);
       loadArchive();   // 运行后刷新历史记录

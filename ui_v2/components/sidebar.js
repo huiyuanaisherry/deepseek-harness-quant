@@ -3,28 +3,25 @@
    active item: #5e6ad2 left border + rgba(94,106,210,.2)→#1c1c22 bg.
    底部：数据日 + 择时（读 portal_dash，LW.api 冗余兜底） */
 (function () {
-  var ITEMS = [
-    { id: 'portal',   label: '门户',   ic: 'home',     url: '/' },
-    { id: 'control',  label: '控制',   ic: 'cpu',      url: '/control' },
-    { id: 'pitch',    label: '决策',   ic: 'target',   url: '/pitch' },
-    { id: 'holdings', label: '持仓',   ic: 'bar',      url: '/holdings' },
-    { id: 'factors',  label: '因子',   ic: 'molecule', url: '/factors' },
-    { id: 'backtest', label: '回测',   ic: 'chart',    url: '/backtest' },
-    { id: 'pitchtrack', label: '远期', ic: 'funnel', url: '/pitchtrack' }
-  ];
+  var ITEMS = [];
   // ★P2 菜单收敛（2026-08-15）：主菜单 6 项（门户/控制/决策/持仓/因子/回测）+「更多」分组（日报/数据/说明）
-  var MORE = [
-    { id: 'report',  label: '日报', ic: 'doc',  url: '/report' },
-    { id: 'data',    label: '数据', ic: 'db',   url: '/data' },
-    { id: 'help',    label: '说明', ic: 'help', url: '/help' }
-  ];
+  var MORE = [];
 
   window.LW = window.LW || {};
   LW.sidebar = {
     render: function (elId, opts) {
+      if (!(opts && opts._navigationLoaded)) {
+        LW.api.get("/api/navigation").then(function (data) {
+          ITEMS = data.items || []; MORE = data.more || [];
+          LW.sidebar.render(elId, Object.assign({}, opts, {_navigationLoaded:true}));
+          window.dispatchEvent(new Event("quant-sidebar-ready"));
+        }).catch(function () { var el=document.getElementById(elId); if(el) el.textContent="导航加载失败，请刷新页面。"; });
+        return;
+      }
       var el = document.getElementById(elId);
       if (!el) return;
       var IC = LW.icons || {};
+      function escape(value) { return String(value).replace(/[&<>"']/g, function(c) { return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"}[c]; }); }
       var active = (opts && opts.active) || 'portal';
       var html =
         '<div class="sb">' +
@@ -34,7 +31,7 @@
           '<nav class="sb-nav">' +
             ITEMS.map(function (it) {
               var cls = it.id === active ? 'sb-item active' : 'sb-item';
-              return '<a class="' + cls + '" href="' + it.url + '">' + (IC[it.ic] || '') + it.label + '</a>';
+              return '<a class="' + cls + '" href="' + escape(it.url) + '">' + (IC[it.ic] || '') + escape(it.label) + '</a>';
             }).join('') +
             /* ★2026-08-16 「更多」默认折叠：点击标签展开（grid-rows 动画），箭头旋转指示 */
             '<div class="sb-sub-label sb-more-toggle" id="' + elId + '-more-toggle" title="展开/收起更多">' +
@@ -43,7 +40,7 @@
               '<div style="overflow:hidden">' +
                 MORE.map(function (it) {
                   var cls = it.id === active ? 'sb-item active sb-sub-item' : 'sb-item sb-sub-item';
-                  return '<a class="' + cls + '" href="' + it.url + '">' + (IC[it.ic] || '') + it.label + '</a>';
+                  return '<a class="' + cls + '" href="' + escape(it.url) + '">' + (IC[it.ic] || '') + escape(it.label) + '</a>';
                 }).join('') +
               '</div>' +
             '</div>' +
@@ -146,6 +143,7 @@
       document.addEventListener('mouseup', up);
     });
   }
+  window.addEventListener('quant-sidebar-ready', initResize);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initResize);
   else initResize();
 })();
@@ -198,6 +196,7 @@
     open.style.display = saved === '1' ? 'flex' : 'none';
     setTimeout(function () { busy = false; }, 260);
   }
+  window.addEventListener('quant-sidebar-ready', initFold);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initFold);
   else initFold();
 })();

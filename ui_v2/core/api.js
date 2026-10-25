@@ -7,6 +7,18 @@
 */
 (function (win) {
   'use strict';
+  var nativeFetch = window.fetch.bind(window);
+  window.fetch = function (url, options) {
+    options = Object.assign({credentials:'same-origin'}, options || {});
+    if (String(options.method || 'GET').toUpperCase() === 'POST') {
+      var headers = new Headers(options.headers || {}); headers.set('X-Quant-Request','1');
+      options.headers = headers;
+    }
+    return nativeFetch(url, options).then(function (response) {
+      if (response.status === 401) { window.location.assign('/login'); throw new Error('登录已过期'); }
+      return response;
+    });
+  };
   var cache = {};        // url -> {ts, data, status:'ok'|'err'}
   var inflight = {};     // url -> Promise（防并发重复请求）
 
@@ -76,7 +88,7 @@
     opts = opts || {};
     return fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Quant-Request':'1' },
       body: JSON.stringify(body || {}),
       cache: 'no-store'
     }).then(function (r) {

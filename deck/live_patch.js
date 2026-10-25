@@ -632,7 +632,7 @@
     var body = { code: code, reason: alerted ? 'tp_stop_trigger' : 'manual' };
     if (price != null) body.price = price;
     fetch('/api/portfolio/sell', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Quant-Request':'1' },
       body: JSON.stringify(body)
     }).then(function (r) { return r.json(); }).then(function (r) {
       toastData(r.ok ? ('✅ ' + code + ' 已卖出（' + (r.status || 'exit') + '）') : ('❌ ' + (r.error || '卖出失败')));

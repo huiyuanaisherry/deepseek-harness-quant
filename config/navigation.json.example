@@ -1,0 +1,72 @@
+{
+  "items": [
+    {
+      "id": "portal",
+      "label": "门户",
+      "ic": "home",
+      "url": "/"
+    },
+    {
+      "id": "control",
+      "label": "控制",
+      "ic": "cpu",
+      "url": "/control"
+    },
+    {
+      "id": "pitch",
+      "label": "决策",
+      "ic": "target",
+      "url": "/pitch"
+    },
+    {
+      "id": "holdings",
+      "label": "持仓",
+      "ic": "bar",
+      "url": "/holdings"
+    },
+    {
+      "id": "factors",
+      "label": "因子",
+      "ic": "molecule",
+      "url": "/factors"
+    },
+    {
+      "id": "backtest",
+      "label": "回测",
+      "ic": "chart",
+      "url": "/backtest"
+    },
+    {
+      "id": "pitchtrack",
+      "label": "远期",
+      "ic": "funnel",
+      "url": "/pitchtrack"
+    }
+  ],
+  "more": [
+    {
+      "id": "report",
+      "label": "日报",
+      "ic": "doc",
+      "url": "/report"
+    },
+    {
+      "id": "data",
+      "label": "数据",
+      "ic": "db",
+      "url": "/data"
+    },
+    {
+      "id": "help",
+      "label": "说明",
+      "ic": "help",
+      "url": "/help"
+    },
+    {
+      "id": "settings",
+      "label": "模型与 API",
+      "ic": "cpu",
+      "url": "/settings"
+    }
+  ]
+}

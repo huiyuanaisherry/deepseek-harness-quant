@@ -1,0 +1,9 @@
+const {test}=require('node:test'); const assert=require('node:assert/strict');
+const {payload,editable,saveMessage}=require('../ui_v2/assets/model-settings.js');
+test('native provider writes only key with its namespace revision',()=>assert.deepEqual(payload({id:'native',settingsNs:'llm-native',revision:8,credential:{writable:true}},{apiKey:'fake',api:'ignored'},2),{provider:'native',expectedRevision:8,apiKey:'fake'}));
+test('blank key omitted; custom metadata and model IDs required',()=>{assert.throws(()=>payload(null,{id:'custom'},3));const p=payload(null,{id:'custom',displayName:'测试',api:'openai-responses',baseURL:'https://example.com',models:'one\ntwo',apiKey:''},3);assert.equal(p.expectedRevision,3);assert.equal(p.models.length,2);assert.ok(!('apiKey' in p));});
+test('environment key cannot be edited',()=>{assert.equal(editable({credential:{writable:true,source:'env'}}),false);assert.equal(editable({credential:{writable:true,source:'store'}}),true);});
+test('partial commit stays explicit failure',()=>assert.match(saveMessage({partial:true,ok:false}),/Key.*失败/));
+test('pi-ai builtin without custom endpoint also accepts key-only',()=>assert.deepEqual(payload({id:'builtin',settingsNs:'llm-pi-ai',revision:7,profile:{models:[]},credential:{writable:true}},{apiKey:'fake'},2),{provider:'builtin',expectedRevision:7,apiKey:'fake'}));
+test('existing custom profile uses row revision',()=>{const p=payload({id:'custom',settingsNs:'llm-pi-ai',revision:12,profile:{api:'openai-responses',baseURL:'https://example.com'},credential:{writable:true}},{displayName:'',api:'openai-responses',baseURL:'https://example.com',models:'one',apiKey:''},3);assert.equal(p.expectedRevision,12);assert.ok(!('apiKey' in p));});
+test('readonly key is never included in payload',()=>assert.ok(!('apiKey' in payload({id:'native',revision:2,credential:{writable:false}},{apiKey:'fake'},2))));
