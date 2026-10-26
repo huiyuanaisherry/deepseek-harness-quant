@@ -183,7 +183,7 @@ test('every watchlist request is strict, uncached detail and single attempt',asy
   }
   const detail=harness.calls.find(function(call){return call.url.indexOf('/stocks/')>=0;});
   assert.equal(detail.opts.bypass,true);
-  assert.equal(detail.opts.timeout,15000);
+  assert.equal(detail.opts.timeout,30000);
 });
 
 test('empty watchlist shows empty state without inventing a stock or detail request',async function(){
@@ -541,4 +541,27 @@ for(const failure of [false,true]) test('old context '+(failure?'failure':'succe
   assert.equal(h.els['wl-main-source'].textContent,'新主系统来源');
   const contextCalls=h.calls.filter(c=>c.url==='/api/data-context');
   assert.equal(contextCalls[1].opts.bypass,true);
+});
+
+
+test('new successful stock detail clears previous timeout and retry while preserving partial-list warning',async function(){
+  const later=deferred();
+  const other=stock('000977.SZ','浪潮信息','ok');
+  const h=setup(url=>{
+    if(url==='/api/data-context') return ctx();
+    if(url==='/api/real-watchlist') return listDto('r1',[okStock,other,failStock]);
+    if(url.includes('/stocks/'+okStock.code)) throw new Error('TIMEOUT');
+    return later.promise;
+  });
+  await flush();await flush();
+  assert.match(h.els['wl-status'].textContent,/超时/);
+  assert.equal(h.els['wl-retry'].hidden,false);
+  h.els['wl-list'].children[1].onclick();await flush();
+  assert.equal(h.els['wl-retry'].hidden,true);
+  assert.ok(!h.els['wl-status'].textContent.includes('超时'));
+  later.resolve(detailDto(other.code,'none','r1'));await flush();
+  assert.match(h.els['wl-stock-title'].textContent,/000977/);
+  assert.equal(h.els['wl-retry'].hidden,true);
+  assert.match(h.els['wl-status'].textContent,/1 只未通过或缺少行情/);
+  assert.equal(h.els['wl-status'].className,'wl-status warn');
 });

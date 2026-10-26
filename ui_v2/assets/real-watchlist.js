@@ -436,11 +436,13 @@
     }
     var seq = ++state.detailSeq;
     var code = state.code, adjust = state.adjust, revision = state.revision;
+    showRetry(null);
+    setStatus('正在读取所选股票详情…');
     beginDetail(code, adjust);
     var url = '/api/real-watchlist/stocks/' + encodeURIComponent(code) +
               '?adjust=' + encodeURIComponent(adjust) +
               (revision ? '&revision=' + encodeURIComponent(revision) : '');
-    LW.api.get(url, {strict: true, retry: 0, bypass: true, timeout: 15000}).then(function (dto) {
+    LW.api.get(url, {strict: true, retry: 0, bypass: true, timeout: 30000}).then(function (dto) {
       if (seq !== state.detailSeq || code !== state.code || adjust !== state.adjust ||
           revision !== state.revision || !findStock(code)) return;
       if (!dto || dto.ok !== true || !dto.stock || dto.stock.code !== code ||
@@ -450,6 +452,8 @@
       if (revision && dto.revision !== revision) return reloadSnapshot('快照已更新，正在重新加载。');
       state.snapshotRetries = 0;
       renderDetail(dto);
+      renderListStatus();
+      showRetry(null);
     }).catch(function (error) {
       if (seq !== state.detailSeq || code !== state.code || adjust !== state.adjust ||
           revision !== state.revision || !findStock(code)) return;
