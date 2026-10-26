@@ -9,6 +9,7 @@
 """
 import glob
 import json
+import math
 import os
 import sys
 import time
@@ -97,8 +98,7 @@ def live_forward(force: bool = False) -> dict:
         import sys as _sp4
         if str(BASE) not in _sp4.path:
             _sp4.path.insert(0, str(BASE))
-        from data.cache import DailyCache
-        mx = DailyCache().latest_trade_date()
+        mx = _ps.readonly_data_date()
     except Exception:
         mx = None
     if not mx:
@@ -1812,12 +1812,7 @@ def _batch_review_payload(entries: list) -> dict:
             except Exception:
                 _res = None
             _mkt_median_cache[_key] = _res
-            # 落盘（历史 (d0,d1) 收益中位数永久确定，追加复用；异常不阻断）
-            try:
-                _MKT_CACHE_FILE.write_text(json.dumps({f"{k[0]}|{k[1]}": v for k, v in _mkt_median_cache.items()},
-                                                      ensure_ascii=False), encoding="utf-8")
-            except Exception:
-                pass
+            # GET aggregation keeps computed medians in memory only.
             return _res
         for d0 in sorted(groups):
             ents = groups[d0]
@@ -1998,8 +1993,7 @@ def _minute_node() -> dict:
     # 最新交易日（完整交易日门槛 ≥4000 只，双库合并——与 live_chain 同基准）
     _latest_td = None
     try:
-        from data.cache import DailyCache
-        _latest_td = str(DailyCache().latest_trade_date() or "") or None
+        _latest_td = str(_ps.readonly_data_date() or "") or None
     except Exception:
         pass
     # 内容日期缓存（10min）；★#347 性能：pyarrow 读 parquet statistics 秒级（0.1s），
@@ -2116,8 +2110,7 @@ def live_chain() -> dict:
     # ★#345 最新交易日（完整交易日门槛 ≥4000 只，双库合并）——统一各环节对照基准
     _latest_td = ""
     try:
-        from data.cache import DailyCache
-        _latest_td = str(DailyCache().latest_trade_date() or "")
+        _latest_td = str(_ps.readonly_data_date() or "")
     except Exception:
         pass
     CHAIN = [
@@ -2895,7 +2888,7 @@ _PORTAL_SPECS = (
     ("forward_track", "logs", "pitch_track_pool_*.json", ("entries",), 4),
     ("timing", "output", "timing_system_*.json", (), 4),
     ("traffic_light", "output", "traffic_light.json", (), 8),
-    ("global_rotation", "output", "global_rotation.json", ("assets",), 8),
+    ("global_rotation", "output", "global_rotation.json", (), 8),
 )
 
 
@@ -2971,6 +2964,16 @@ def _portal_modules(mode: str, dash=None, root=None) -> dict:
                                     item_keys=item_keys, scope=key,
                                     stale_days=stale_days)
             status = res["status"]
+            if key == "global_rotation" and status["state"] in ("ready", "stale"):
+                payload = res.get("payload") or {}
+                if not isinstance(payload.get("a_share_weak"), bool) or "global_rotation" not in payload:
+                    status = _module_state(key, "error", mode, status.get("data_date"),
+                                           reason="artifact_schema_mismatch")
+            if key == "timing" and status["state"] in ("ready", "stale"):
+                score = (res.get("payload") or {}).get("score")
+                if not isinstance(score, (int, float)) or isinstance(score, bool) or not math.isfinite(score):
+                    status = _module_state(key, "error", mode, status.get("data_date"),
+                                           reason="artifact_schema_mismatch")
             if key == "traffic_light" and status["state"] == "ready" \
                     and not (res.get("payload") or {}).get("state"):
                 status = _module_state(key, "error", mode, status.get("data_date"),
@@ -2980,6 +2983,11 @@ def _portal_modules(mode: str, dash=None, root=None) -> dict:
             status = _module_state(key, "error", mode, reason="status_probe_failed")
         modules[key] = status
     modules["brief"] = _brief_module(mode, dash.get("brief"))
+    if modules["brief"]["state"] in ("ready", "empty") and any(
+            modules[key]["state"] not in ("ready", "empty")
+            for key in ("timing", "opp_pool", "pitch", "tech_pitch", "stop_alerts")):
+        modules["brief"] = _module_state("brief", "blocked", mode,
+                                         reason="analysis_incomplete")
     modules["chain"] = _chain_module(mode, dash.get("chain"))
     modules["api_health"] = _health_module(mode, dash.get("api_health"))
     modules["schedule"] = _schedule_module(mode, dash.get("schedule"))
@@ -3028,8 +3036,7 @@ def live_portal_dash() -> dict:
         pass
     try:
         # ★#347 数据日（顶层，供门户摘要条"数据日"显示——完整交易日门槛）
-        from data.cache import DailyCache
-        _td = DailyCache().latest_trade_date()
+        _td = _ps.readonly_data_date()
         if _td:
             out["data_date"] = str(_td)
             # ★2026-08-14 数据即时性优化：数据日语义（盘中/盘后/周末 + 下次更新说明）
@@ -3049,17 +3056,17 @@ def live_portal_dash() -> dict:
                 elif _hm < 1500:
                     _sem = "盘中 · 实时数据为上一交易日（今日收盘后更新）"
                 elif _hm < 1830:
-                    _sem = "已收盘 · 今日数据管道更新中"
+                    _sem = "已收盘 · 缓存包含今日数据；任务状态另见调度信息"
                 else:
-                    _sem = "今日数据已更新"
+                    _sem = "缓存包含今日数据；覆盖范围另行校验"
             else:
                 _days = (_dnow.date() - _td_ts.date()).days
                 if _wk >= 5:
-                    _sem = f"周末 · 最新完整交易日 {_td}"
+                    _sem = f"周末 · 缓存行情数据日 {_td}"
                 elif _days >= 1:
-                    _sem = f"最新完整交易日 {_td} · 今日数据待更新"
+                    _sem = f"缓存行情数据日 {_td} · 今日数据待更新"
                 else:
-                    _sem = f"最新完整交易日 {_td}"
+                    _sem = f"缓存行情数据日 {_td}"
             out["data_semantic"] = _sem
     except Exception:
         pass
@@ -3454,7 +3461,6 @@ def live_wufu_rotation() -> dict:
     except FileNotFoundError:
         _state, _reason = "blocked", "input_missing"
     except Exception as _e:
-        out["error"] = str(_e)[:200]
         _st = getattr(_e, "state", None)
         _rs = getattr(_e, "reason", None)
         if _st in ("blocked", "error") and _rs:

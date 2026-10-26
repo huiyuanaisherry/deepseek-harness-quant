@@ -25,7 +25,7 @@ AS_OF = date(2026, 10, 26)
 END = "2026-10-23"
 
 
-def _config(*, etfs_by_index=False, support="unverified"):
+def _config(*, etfs_by_index=False, support="verified"):
     """合成映射配置：4 指数 + 9 ETF，列名可用显式名或位置。"""
     indices = [
         {"key": f"idx{i}", "name": f"指数{i}", "column": f"idx{i}",
@@ -179,7 +179,7 @@ class StaleAndInvalidTest(_Base):
         index_df, etf_df = _frames()
         index_df.iloc[-1, 0] = np.nan
         self.patch_frames(index_df, etf_df)
-        self.expect_error("input_invalid", "error", func=gr.compute, out_path=self.out)
+        self.expect_error("input_date_mismatch", "blocked", func=gr.compute, out_path=self.out)
         self.assertFalse(self.out.exists())
 
 

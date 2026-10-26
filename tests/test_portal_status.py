@@ -294,7 +294,7 @@ class PortalModulesTest(unittest.TestCase):
         self._write("output/traffic_light.json",
                     {"label": "观望", "asof": TODAY})
         self._write("output/global_rotation.json",
-                    {"date": OLD_DAY, "assets": [1]})
+                    {"date": OLD_DAY, "a_share_weak": False, "global_rotation": None})
 
         modules = live_api._portal_modules("real", {}, root=self.root)
 

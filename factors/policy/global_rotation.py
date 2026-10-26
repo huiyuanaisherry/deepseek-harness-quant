@@ -156,6 +156,8 @@ def _load_panel(input_dir, filename, items, min_rows):
     for item in items:
         if item["support"] == "unsupported":
             raise RotationInputError("asset_unsupported", "blocked", item["key"])
+        if item["support"] != "verified":
+            raise RotationInputError("asset_unverified", "blocked", item["key"])
         col = item["column"]
         if col is not None:
             if col not in raw.columns:
@@ -183,6 +185,16 @@ def _load_panel(input_dir, filename, items, min_rows):
 
 def _check_lag(panels, as_of):
     latest = min(panel.index.max() for panel in panels)
+    expected = latest.normalize()
+    for panel in panels:
+        if panel.index.has_duplicates:
+            raise RotationInputError("input_invalid", "error", "duplicate_dates")
+        if panel.index.max().date() > _as_date(as_of):
+            raise RotationInputError("input_future", "blocked")
+        for column in panel:
+            valid = panel[column].dropna()
+            if valid.empty or valid.index.max().normalize() != expected:
+                raise RotationInputError("input_date_mismatch", "blocked")
     lag = (_as_date(as_of) - latest.date()).days
     if lag > MAX_LAG_DAYS:
         raise RotationInputError("input_stale", "blocked", f"lag_{lag}d")
@@ -296,8 +308,8 @@ def widget(input_dir=None, as_of=None, config_path=None) -> dict:
     for item in etf_items:
         key = item["key"]
         s = etf[key].dropna()
-        ret20 = float(s.iloc[-1] / s.iloc[-21] - 1) if len(s) > 21 else None
-        ret60 = float(s.iloc[-1] / s.iloc[-61] - 1) if len(s) > 61 else None
+        ret20 = float(s.iloc[-1] / s.iloc[-21] - 1) if len(s) >= 21 else None
+        ret60 = float(s.iloc[-1] / s.iloc[-61] - 1) if len(s) >= 61 else None
         mom = _momentum_r2(s)
         m_ann, r2 = mom if mom else (None, None)
         last_ma = ma10e[key].iloc[-1]

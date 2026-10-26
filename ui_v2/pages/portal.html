@@ -113,7 +113,7 @@
 
       <!-- 实时行情快照（新浪实时 · 60s 轮询） -->
       <div class="v2-card anim-fade-in-up d1">
-        <h2> 实时行情 <span class="tag">盘中快照 · 60s 刷新 · 新浪</span></h2>
+        <h2> 实时行情 <span class="tag">行情快照 · 数据状态单独验收</span></h2>
         <div id="rt-box" class="mini" style="line-height:2"> 加载中…</div>
       </div>
 
@@ -192,7 +192,7 @@
     return v.showValue === true ? note : PS.moduleNote(v);
   }
   function failText(el, text) {
-    if (el && el.innerHTML && el.innerHTML.indexOf('加载中') >= 0) {
+    if (el) {
       el.innerHTML = '<span style="color:var(--gold)">' + text + '</span>';
     }
   }
@@ -210,7 +210,7 @@
     var grBox = document.getElementById('global-rot-box');
     var grMod = modOf(mods, 'global_rotation');
     if (grBox) {
-      if (gr.a_share_weak) {
+      if (grMod.showValue && gr.a_share_weak) {
         var g = gr.global_rotation || {};
         grBox.style.display = '';
         grBox.innerHTML =
@@ -340,7 +340,7 @@
     apiKeys.forEach(function (k) {
       var st = healthState(apiHealth[k]);
       hCount[st] = (hCount[st] || 0) + 1;
-      if (st !== 'ready' && st !== 'empty') { hBad.push(k); }
+      if (st !== 'ready') { hBad.push(k); }
     });
     var apiTxt = apiKeys.length
       ? '<span class="mini">数据源 ' + apiKeys.length + ' 项' +
@@ -409,7 +409,7 @@
     var rf = tm.regime_fit || {};
     var tb = document.getElementById('timing-box');
     var timingMod = modOf(mods, 'timing');
-    if (!tm || tm.score == null) {
+    if (!timingMod.showValue || !tm || tm.score == null) {
       // ★2026-10-26 Task 2：无可计算数据时结束"加载中"，给出模块状态与原因
       tb.innerHTML =
         '<h2> 市场择时 <span class="tag">四维打分 · 拥挤度 · 风格适配</span></h2>' +
@@ -493,8 +493,9 @@
     failText(document.getElementById('brief-box'), f.text);
     failText(document.getElementById('sys-box'), f.text);
     failText(document.getElementById('chain-box'), f.text);
+    failText(document.getElementById('global-rot-box'), f.text);
     var kb = document.getElementById('kpi-box');
-    if (kb && !kb.innerHTML.trim()) {
+    if (kb) {
       kb.innerHTML = '<span class="mini" style="color:var(--gold)">状态未知：' + f.text + '</span>';
     }
   });
@@ -504,7 +505,7 @@
 
   // ★2026-08-16 五福轮动摆件（常显：9 只全球 ETF 代理池动量面板 + 弱市防守建议）
   function loadWufu() {
-    LW.api.get('/api/live/wufu_rotation').then(function (d) {
+    LW.api.get('/api/live/wufu_rotation', { strict: true }).then(function (d) {
       var body = document.getElementById('wufu-body');
       if (!body) return;
       if (!d || d.ok === false || !(d.assets || []).length) {
@@ -593,8 +594,8 @@
       if (box) box.innerHTML = '<span style="color:var(--gold)">实时行情加载失败</span><span style="opacity:.7"> ' + e + '</span>';
     });
   }
-  loadRealtime();
-  setInterval(loadRealtime, 60000);
+  // Live fetching is deferred until a bounded collection job provides a snapshot.
+  document.getElementById('rt-box').textContent = '尚无只读实时行情快照，本页不自动采集。';
 
   // ★2026-08-14 API 接口状态轮询（/api/live/endpoints，120s 后端缓存 → 前端 60s）
   function loadApiStatus() {
@@ -639,8 +640,9 @@
       if (box) box.innerHTML = '<span style="color:var(--gold)">接口状态加载失败</span><span style="opacity:.7"> ' + e + '</span>';
     });
   }
-  loadApiStatus();
-  setInterval(loadApiStatus, 60000);
+  // Legacy probes include data-mutating endpoints; do not invoke on page load.
+  document.getElementById('api-status-tag').textContent = '未自动探测';
+  document.getElementById('api-box').textContent = '尚未提供只读接口状态快照；业务数据状态见上方数据源健康。';
 
   /* ★#345 决策链渲染：每环节显示「数据日」，对照最新交易日判断是否最新（结果导向，非文件新鲜度） */
   function renderChain(data, mods) {

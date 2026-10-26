@@ -21,7 +21,7 @@ MODES = ("demo", "real", "unknown")
 
 _SAFE_CODE = re.compile(r"^[a-z0-9][a-z0-9_\-]{0,63}$")
 
-_DATE_KEYS = ("data_date", "date", "trade_date", "asof", "end_date")
+_DATE_KEYS = ("data_date", "date", "trade_date", "pool_date", "asof", "end_date")
 _TS_KEYS = ("generated_at", "updated", "ts", "created_at")
 
 
@@ -233,7 +233,11 @@ def assess_artifact(path, *, mode="unknown", item_keys=(), count_key=None,
     generated_at = extract_generated_at(payload)
 
     state, reason = "ready", None
-    if stale_days is not None and data_date:
+    if payload.get("ok") is False:
+        state, reason = "error", "compute_failed"
+    elif stale_days is not None and not data_date:
+        state, reason = "blocked", "data_date_missing"
+    if state == "ready" and stale_days is not None and data_date:
         age_days = (_as_datetime(now).date()
                     - datetime.strptime(data_date, "%Y-%m-%d").date()).days
         if age_days > int(stale_days):
@@ -272,3 +276,38 @@ def assess_latest(root, pattern, *, mode="unknown", run_id=None, **kwargs) -> di
         return _missing(mode, kwargs.get("scope", "unknown"),
                         "artifact_missing", None, run_id)
     return assess_artifact(files[-1], mode=mode, run_id=run_id, **kwargs)
+
+
+def readonly_data_date(cache_dir=None):
+    """Latest observed bar date, not a claim of full-market completeness.
+
+    Never initialize schemas or create SQLite sidecars. Active WAL inputs are
+    withheld rather than read as an immutable snapshot that omits pending rows.
+    """
+    import sqlite3
+    if cache_dir is None:
+        from data.cache import _resolve_cache_dir
+        cache_dir = _resolve_cache_dir()
+    root = Path(cache_dir).resolve()
+    if not root.is_dir():
+        return None
+    paths = [root / 'bars.db', root / 'bars_incr.db']
+    paths.extend(sorted(root.glob('bars_incr_*.db'))[-3:])
+    if any(Path(str(p) + '-wal').exists() for p in paths):
+        return None
+    dates = []
+    for path in paths:
+        if not path.is_file():
+            continue
+        try:
+            con = sqlite3.connect(path.as_uri() + '?mode=ro&immutable=1', uri=True, timeout=2)
+            try:
+                row = con.execute('SELECT MAX(date) FROM daily_bar').fetchone()
+                value = _iso_date(row[0]) if row else None
+                if value:
+                    dates.append(value)
+            finally:
+                con.close()
+        except sqlite3.Error:
+            return None
+    return max(dates) if dates else None
