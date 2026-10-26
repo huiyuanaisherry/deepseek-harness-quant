@@ -96,7 +96,7 @@
     var note = action === 'buy' ? 'Pitch 审批买入' : (action === 'drop' ? 'Pitch 审批放弃' : 'Pitch 审批撤回');
     return fetch('/api/decide', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Quant-Request':'1' },
       body: JSON.stringify({ code: code, action: action, note: note })
     }).then(function (r) { return r.json(); }).then(function (res) {
       if (res.ok) {
@@ -145,7 +145,7 @@
       }
       return fetch('/api/portfolio/sell', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Quant-Request':'1' },
         body: JSON.stringify({ code: code, price: null, reason: 'manual' })
       }).then(function (r) { return r.json(); }).then(function (res) {
         if (res.ok) {

@@ -21,7 +21,8 @@ data:
     financial_primary: "tushare"     # 财报主源（含公告日 ann_date → PIT）
     coverage: "akshare"              # 业绩预告/快报/机构调研
   tushare_token: "<your-config>" # [升级 2026-08-07 主服务器 15000积分+实时竞价]
-  tushare_api_url: "<your-config>" # 主服务器（109 接口，无逐股限频，按日批量 5533 只 3-16s）
+  tushare_api_url: "https://api.tushare.pro" # 完整 Pro 兼容地址；可在 /data-settings 配置中转
+  tushare_allow_insecure_http: false # HTTP 中转需在网页明确确认 Token 明文传输
   tushare_backup:                                  # 备用服务器（HTTP API 封装，见 data/fetcher_tushare_backup.py）
     url: "<your-config>"
     api_key: "<your-config>"

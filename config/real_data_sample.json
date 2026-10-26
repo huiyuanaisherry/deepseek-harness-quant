@@ -1,0 +1,40 @@
+{
+  "symbols": [
+    {
+      "code": "000938.SZ",
+      "name": "紫光股份",
+      "suspended_dates": {}
+    },
+    {
+      "code": "000977.SZ",
+      "name": "浪潮信息",
+      "suspended_dates": {}
+    },
+    {
+      "code": "000063.SZ",
+      "name": "中兴通讯",
+      "suspended_dates": {}
+    },
+    {
+      "code": "603019.SH",
+      "name": "中科曙光",
+      "suspended_dates": {}
+    },
+    {
+      "code": "601138.SH",
+      "name": "工业富联",
+      "suspended_dates": {}
+    },
+    {
+      "code": "688041.SH",
+      "name": "海光信息",
+      "suspended_dates": {}
+    }
+  ],
+  "max_symbols": 10,
+  "history_days": 730,
+  "finance_days": 730,
+  "max_rows": 1000,
+  "output_dir": "data/real-smoke/sample",
+  "network_attempts": 2
+}

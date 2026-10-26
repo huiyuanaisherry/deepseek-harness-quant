@@ -1,0 +1,27 @@
+# 项目知识与接手入口
+
+本目录是本项目的知识记录，随用户 fork 版本管理，并部署到 Windows / WSL 项目目录。不要将 Mac 工具的默认外部知识库当成本项目的运行依赖。
+
+## 阅读顺序
+
+1. [真实数据接入需求与当前验收](requirements/real-data-validation.md)：当前工作目标、样本范围、完成程度、限制和后续事项。
+2. [配置使用说明](API配置.md)：模型 Key、管理令牌、Tushare Token 各自用途及网页配置。
+3. [历史交接与部署记录](HANDOFF.md)：每轮版本、验证证据及已知问题。较旧的「尚未部署」等描述以文末最新记录为准。
+4. [隐私审查记录](reviews/2026-10-25-privacy-and-provider-settings.md)：审查范围、已修复问题和边界，不代表第三方依赖与供应商的无限安全保证。
+5. [小样本实施计划](superpowers/plans/2026-10-25-real-data-sample.md)：实现任务及复现入口。
+6. [交给 Trae 的真实观察池方案](superpowers/plans/2026-10-25-real-watchlist-for-trae.md)：只读 `/real-watchlist` 页面与三个来源接口已实现（提交 `8edfe1d`），本地合成数据 Chrome 验收通过；Windows 尚未部署，真实六只页面验收待恢复 SSH 后进行。
+
+7. [真实观察池实现审查及修复验收](reviews/2026-10-26-real-watchlist-review.md)：六项问题已修复并部署Windows，当前功能提交8198b06；服务器与HTTP验收通过，最终完整浏览器复测受网络/浏览器连接故障影响。此记录覆盖上文未部署和“待恢复SSH”的旧判断。
+
+8. [交给 Trae 的首页真实数据接入方案](superpowers/plans/2026-10-26-portal-real-data-for-trae.md)：待实施；按状态治理、独立数据与计算、生产切换和调度分阶段验收。禁止把六股观察池完成等同首页选股链可用。
+9. [门户数据依赖审查](reviews/2026-10-26-portal-data-dependency-review.md)（Task 1，含 Task 3 第 9 节 Parquet 依赖与五福轮动就绪条件）与 [模块可用性契约交付](reviews/2026-10-26-portal-status-contract.md)（Task 2）：首页各模块的依赖、六态契约、测试命令与结果、当前阻塞；未切换数据源、未启用调度、未在生产安装依赖。
+
+9. [门户状态治理发布审查](reviews/2026-10-26-portal-release-review.md)：Trae Task 1–3 审查及修复；真实数据链 Task 4–7 仍未实施。
+
+## 长期规则
+
+- 用户部署目标为 Windows / WSL；网页使用 Windows 可达地址访问，本机回环地址不能代表另一台主机。
+- 模型 Key 和行情 Token 是不同配置，管理令牌只用于控制台登录。
+- 真实行情、私有财务记录、Token 和会话凭据只存服务端私有目录，不进入 Git 或知识文档；文档仅记录结构、范围、状态、行数和验收结果。
+- 接手时先核对生产提交和私有验收报告，再决定下一步；不能把历史计划、模拟测试或页面显示成功当成真实业务链路成功。
+- 当前阶段不授权自动交易。全市场采集、数据源切换及计划任务按单独验收推进。

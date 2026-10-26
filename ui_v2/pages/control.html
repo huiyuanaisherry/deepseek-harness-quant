@@ -128,7 +128,7 @@
 <div id="sidebar"></div>
 <div class="v2-wrap">
   <div class="v2-h"><span class="bar"></span><h1>控制</h1><span class="sub">DeepSeek HARNESS · 对话 · 状态 · 自主推进</span></div>
-  <div class="mini" style="opacity:.7">量化系统 ←→ HARNESS 对话直连（自动重连） · 完整 GUI 一键弹出 · 30s 状态刷新</div>
+  <div class="mini" style="opacity:.7">量化系统 ←→ HARNESS 对话直连（自动重连） · 同源模型配置 · 30s 快照刷新</div>
 
   <!-- ★2026-08-16 对话区：自绘聊天（健壮连接：超时 + 指数退避重试 + 自动重连） -->
   <div class="v2-card anim-fade-in-up" style="margin-top:12px;padding:14px 16px">
@@ -136,17 +136,17 @@
       <h2 style="margin:0;flex:1"> DeepSeek HARNESS · 对话 <span class="tag">原生直连 · 发「1」触发自主推进</span></h2>
       <span class="hz-conn-badge" id="hz-conn-badge"><span class="st-dot"></span><span id="hz-conn-txt">连接中…</span></span>
       <button id="hz-import-btn" class="hz-import-btn" title="导入 Skill / Agent 预设">+</button>
-      <a class="hz-open-gui" href="http://127.0.0.1:3080" target="_blank" rel="noopener">打开完整 GUI ↗</a>
+      <a class="hz-open-gui" href="/settings" target="_blank" rel="noopener">模型与 API 设置 ↗</a>
     </div>
     <div class="hz-chat-native">
       <div class="hz-sess-panel">
-        <div class="hz-sess-head"><span>会话</span></div>
+        <div class="hz-sess-head"><span>会话</span><button id="hz-new-session" class="hz-open-gui" type="button">新建会话</button></div>
         <input id="hz-sess-filter" class="hz-sess-filter" placeholder="筛选会话（标题/内容）…">
         <div class="hz-bulk-bar">
-          <button id="hz-ck-all" class="hz-bulk-btn" title="全选可删除会话">全选</button>
-          <button id="hz-del-sel" class="hz-bulk-btn" title="删除选中的对话">删除所选</button>
-          <button id="hz-clear-all" class="hz-bulk-btn danger" title="清空所有未锁定的对话">一键清空</button>
-          <button id="hz-restore" class="hz-bulk-btn" title="恢复本面板隐藏的所有对话（不影响 GUI）">恢复</button>
+
+
+
+
         </div>
         <div class="hz-sess-list" id="hz-sess-list"><div class="hz-msg sys" style="padding:8px">加载会话…</div></div>
       </div>
@@ -164,14 +164,14 @@
       <span id="hz-snap" class="hz-snap">Pitch 快照: 未加载</span>
       <span style="flex:1"></span>
       <button id="hz-snap-btn" class="v2-btn" style="padding:3px 10px;font-size:12px">同步 Pitch</button>
-      <a class="mini" href="http://127.0.0.1:3080" target="_blank" rel="noopener" style="color:var(--navy2)">完整 GUI 另开 ↗</a>
+      <a class="mini" href="/settings" target="_blank" rel="noopener" style="color:var(--navy2)">模型与 API 设置 ↗</a>
     </div>
   </div>
 
   <!-- 状态与最近推进（两列） -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;margin-top:14px">
     <div class="v2-card anim-fade-in-up d1" style="margin-top:0">
-      <h2> 连接状态 <span class="tag" id="hz-tag">…</span></h2>
+      <h2> 运行快照 <span class="tag" id="hz-tag">…</span></h2>
       <div class="mini" id="hz-conn" style="line-height:2"> 加载中…</div>
     </div>
     <div class="v2-card anim-fade-in-up d1" style="margin-top:0">
@@ -190,14 +190,14 @@
   <div class="v2-card anim-fade-in-up d1" style="margin-top:14px">
     <h2> 快速操作与架构</h2>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px">
-      <a class="hz-open-gui" href="http://127.0.0.1:3080" target="_blank" rel="noopener">打开完整 GUI ↗</a>
+      <a class="hz-open-gui" href="/settings" target="_blank" rel="noopener">模型与 API 设置 ↗</a>
       <a class="v2-btn" href="/" style="text-decoration:none">返回量化门户</a>
       <button id="hz-refresh" class="v2-btn">刷新状态</button>
     </div>
     <div class="mini" style="margin-top:10px;line-height:1.9;color:var(--muted)">
       <b style="color:var(--navy)">DeepSeek HARNESS</b>（:3080）＝ 量化系统的<b>审计/控制/协作层</b>；
       <b style="color:var(--navy)">量化系统</b>（:8787）＝ 生产执行层（决策链 L0/L2/L1、持仓、因子、管道）。<br>
-      对话直连 :3080（8s 超时 + 指数退避自动重连，掉线自动恢复）；状态快照 <span style="font-family:monospace">output/harness_state.json</span> 30s 刷新。
+      对话通过已登录的同源量化桥接转发至 DSH；状态快照 <span style="font-family:monospace">output/harness_state.json</span> 30s 刷新。
       协作方：factor_pool（研究员）· AlphaGPT（自动因子挖掘，科研）。
     </div>
   </div>
@@ -255,7 +255,7 @@
   }
   function hzGet(path, timeoutMs) {
     return hzFetch(path, timeoutMs || 8000).then(function (d) {
-      if (connState !== 'ok') setConn('ok', '已连接');
+      setConn('ok', '已连接');
       retryDelay = 1000;
       return d;
     }).catch(function (e) {
@@ -283,7 +283,7 @@
     var tm = setTimeout(function () { ctrl.abort(); }, 10000);
     return fetch(HZ + path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Quant-Request':'1' },
       body: JSON.stringify(body),
       signal: ctrl.signal,
     }).then(function (r) {
@@ -298,7 +298,7 @@
   /* ---------- 自绘聊天 ---------- */
   var curTarget = null;       // { kind:'root', id, title } | { kind:'niu', persona, name }
   var busy = false;
-  var lastCount = 0;
+  var creatingSession = false;
   var rootsCache = [];
   var niuCache = [];
   var snapshotCache = '';
@@ -330,16 +330,23 @@
       ? '/api/proxy/niuapi/recent?persona=' + encodeURIComponent(curTarget.persona) + '&limit=30'
       : '/api/proxy/quantapi/recent?sessionId=' + encodeURIComponent(curTarget.id) + '&limit=30';
   }
+  function turnFailure(status) {
+    if (status.state === 'aborted') return '本轮已停止';
+    if (status.code === 'UNSUPPORTED_REASONING_EFFORT') return '调用失败：模型不支持当前推理强度。请重新设置默认模型，再新建会话。';
+    return '模型调用失败（' + (status.code || 'MODEL_ERROR') + '），请检查厂商 Key、地址和模型 ID。';
+  }
   function loadRecent() {
     var q = targetQuery();
     if (!q) return Promise.resolve();
     return hzGet(q, curTarget && curTarget.kind === 'niu' ? 30000 : 8000).then(function (d) {
-      lastCount = (d.messages || []).length;
-      renderMsgs(d.messages || [], d.busy);
+      renderMsgs(d.messages || [], d.status && d.status.state === 'running');
+      if (!busy && d.status && (d.status.state === 'error' || d.status.state === 'aborted')) {
+        document.getElementById('hz-chat-status').textContent = turnFailure(d.status);
+      }
     }).catch(function (e) {
       document.getElementById('hz-msgs').innerHTML =
         '<div class="hz-msg sys">🔌 HARNESS 暂不可达（' + esc((e && e.message) || e) + '）—— 自动重连中…（完整 GUI：' +
-        '<a href="http://127.0.0.1:3080" target="_blank" style="color:var(--navy2)">打开 ↗</a>）</div>';
+        '<a href="/settings" target="_blank" style="color:var(--navy2)">打开 ↗</a>）</div>';
     });
   }
   /* 会话分类菜单：主系统（根会话）+ 主观·牛散 */
@@ -349,7 +356,6 @@
   function relatedRoots() {
     return rootsCache.filter(function (s) {
       if (KEEP_EXCLUDE_TITLES.indexOf(s.title) >= 0) return false;
-      if (!s.preview && !s.role) return false;
       if (sessKw) {
         var hay = ((s.title || '') + ' ' + (s.preview || '')).toLowerCase();
         if (hay.indexOf(sessKw.toLowerCase()) < 0) return false;
@@ -366,16 +372,12 @@
     html += rel.map(function (s) {
       var locked = s.locked === true;
       var active = curTarget && curTarget.kind === 'root' && curTarget.id === s.id ? ' active' : '';
-      var ck = locked ? '' : '<input type="checkbox" class="hz-sess-ck" data-ck="' + esc(s.id) + '"' + (selectedSess[s.id] ? ' checked' : '') + '>';
+      var ck = '';
       return '<div class="hz-sess-item' + active + '" data-kind="root" data-sid="' + esc(s.id) + '">' +
         '<div class="trow">' + ck + '<span class="tt">' + esc(s.title) +
         (s.current ? ' <span class="cur">●当前</span>' : '') +
-        (locked ? (s.coreLocked
-          ? ' <span class="hz-lock core" title="核心会话（主系统）永久锁死">🔒</span>'
-          : ' <span class="hz-lock unlockable" data-unlock="' + esc(s.id) + '" title="点击解锁后可删除">🔒</span>') : '') +
         '</span></div>' +
         (s.preview ? '<div class="p">' + esc(s.preview) + '</div>' : '<div class="p">空会话</div>') +
-        (locked ? '' : '<button class="hz-sess-del" data-del="' + esc(s.id) + '" title="删除对话">×</button>') +
         '</div>';
     }).join('');
     html += '<div class="hz-sess-cat">主观 · 牛散 <span style="color:#71717a">基于 Pitch 卡选股</span></div>';
@@ -395,101 +397,9 @@
     }).join('');
     if (sessKw && !niuShown) html += '<div class="hz-msg sys" style="padding:4px 8px">无匹配</div>';
     list.innerHTML = html;
-    /* ★2026-08-16 解锁：点击 🔒（可解锁锁）→ 确认 → unlock → 刷新后变可删 */
-    list.querySelectorAll('.hz-lock.unlockable').forEach(function (lk) {
-      lk.addEventListener('click', function (ev) {
-        ev.stopPropagation();
-        var sid = lk.getAttribute('data-unlock');
-        if (!confirm('解锁该会话？解锁后可从列表删除（若为运行中会话，删除前请确认不再使用）')) return;
-        hzPost('/api/proxy/quantapi/unlock', { sessionId: sid }).then(function (res) {
-          if (res && res.ok) {
-            loadSessions();
-          } else {
-            alert('解锁失败：' + esc((res && res.error) || '未知'));
-          }
-        }).catch(function (e) { alert('解锁失败：' + esc(e.message)); });
-      });
-    });
-    /* ★2026-08-16 批量选择：复选框变更更新选中集合 */
-    list.querySelectorAll('.hz-sess-ck').forEach(function (ck) {
-      ck.addEventListener('click', function (ev) {
-        ev.stopPropagation();
-        var sid = ck.getAttribute('data-ck');
-        if (ck.checked) selectedSess[sid] = true;
-        else delete selectedSess[sid];
-        document.getElementById('hz-del-sel').textContent = '删除所选' + (Object.keys(selectedSess).length ? ' (' + Object.keys(selectedSess).length + ')' : '');
-      });
-    });
-    /* ★2026-08-16 删除对话：确认后 POST /quantapi/delete 归档会话并刷新列表 */
-    list.querySelectorAll('.hz-sess-del').forEach(function (btn) {
-      btn.addEventListener('click', function (ev) {
-        ev.stopPropagation();
-        var sid = btn.getAttribute('data-del');
-        if (!confirm('确认删除该对话？（从工作区归档，不可撤销）')) return;
-        hzPost('/api/proxy/quantapi/delete', { sessionId: sid }).then(function (res) {
-          if (res && res.ok) {
-            if (curTarget && curTarget.kind === 'root' && curTarget.id === sid) curTarget = null;
-            loadSessions();
-          } else {
-            alert('删除失败：' + esc((res && res.error) || '未知'));
-          }
-        }).catch(function (e) {
-          alert('删除失败：' + esc(e.message));
-        });
-      });
-    });
-    /* ★2026-08-16 批量工具栏：绑定在顶层（页面加载即生效，不依赖列表渲染成功） */
-    var delSelBtn = document.getElementById('hz-del-sel');
-    document.getElementById('hz-ck-all').onclick = function () {
-      var list = document.getElementById('hz-sess-list');
-      var cks = list ? list.querySelectorAll('.hz-sess-ck') : [];
-      var allChecked = cks.length > 0 && Array.from(cks).every(function (c) { return c.checked; });
-      cks.forEach(function (c) {
-        c.checked = !allChecked;
-        if (c.checked) selectedSess[c.getAttribute('data-ck')] = true;
-        else delete selectedSess[c.getAttribute('data-ck')];
-      });
-      delSelBtn.textContent = '删除所选' + (Object.keys(selectedSess).length ? ' (' + Object.keys(selectedSess).length + ')' : '');
-    };
-    delSelBtn.onclick = function () {
-      var ids = Object.keys(selectedSess);
-      if (!ids.length) { alert('未勾选任何会话（锁死会话不可选）'); return; }
-      if (!confirm('确认删除选中的 ' + ids.length + ' 个对话？（从工作区归档，不可撤销）')) return;
-      hzPost('/api/proxy/quantapi/delete-batch', { sessionIds: ids }).then(function (res) {
-        if (res && res.ok) {
-          selectedSess = {};
-          alert('已删除 ' + res.deleted + ' 个对话' + (res.skipped && res.skipped.length ? '，跳过锁死 ' + res.skipped.length + ' 个' : ''));
-          loadSessions();
-        } else {
-          alert('批量删除失败：' + esc((res && res.error) || '未知'));
-        }
-      }).catch(function (e) { alert('批量删除失败：' + esc(e.message)); });
-    };
-    document.getElementById('hz-clear-all').onclick = function () {
-      if (!confirm('⚠️ 一键清空：隐藏本面板所有未锁定的对话！\n仅本面板生效——GUI 面板与聊天历史完全不受影响（可随时点「恢复」找回）。\n\n确认继续？')) return;
-      hzPost('/api/proxy/quantapi/clear-all', {}).then(function (res) {
-        if (res && res.ok) {
-          selectedSess = {};
-          alert('已隐藏 ' + res.deleted + ' 个对话（仅本面板），锁死保留 ' + res.locked + ' 个');
-          loadSessions();
-        } else {
-          alert('清空失败：' + esc((res && res.error) || '未知'));
-        }
-      }).catch(function (e) { alert('清空失败：' + esc(e.message)); });
-    };
-    /* ★2026-08-16 恢复：清空本面板隐藏名单，全部会话重现（GUI 不受影响） */
-    document.getElementById('hz-restore').onclick = function () {
-      hzPost('/api/proxy/quantapi/restore-all', {}).then(function (res) {
-        if (res && res.ok) {
-          selectedSess = {};
-          loadSessions();
-        } else {
-          alert('恢复失败：' + esc((res && res.error) || '未知'));
-        }
-      }).catch(function (e) { alert('恢复失败：' + esc(e.message)); });
-    };
     list.querySelectorAll('.hz-sess-item').forEach(function (el) {
       el.addEventListener('click', function () {
+        if (busy || creatingSession) return;
         var kind = el.getAttribute('data-kind');
         var sid = el.getAttribute('data-sid');
         if (kind === 'niu') {
@@ -588,6 +498,7 @@
       }
       renderSessList();
       document.getElementById('hz-chat-session').textContent = curLabel();
+      if (!curTarget) document.getElementById('hz-msgs').innerHTML = '<div class="hz-msg sys">还没有主会话，请点击「新建会话」开始。</div>';
       return loadRecent();
     }).catch(function (e) {
       setConn('retry', '重连中…');
@@ -602,10 +513,27 @@
       }
     });
   }
+  document.getElementById('hz-new-session').onclick = function () {
+    var button = this;
+    if (busy || button.disabled) return Promise.resolve();
+    button.disabled = true;
+    creatingSession = true;
+    document.getElementById('hz-chat-status').textContent = '正在创建会话…';
+    return hzPost('/api/chat/session', {}).then(function (result) {
+      if (!result.ok || !result.sessionId) throw new Error(result.error || '未返回会话 ID');
+      curTarget = {kind:'root', id:result.sessionId, title:'新会话'};
+      sessKw = '';
+      filterInput.value = '';
+      document.getElementById('hz-chat-status').textContent = '会话已就绪，可发送消息';
+      return loadSessions();
+    }).catch(function (error) {
+      document.getElementById('hz-chat-status').textContent = '创建失败：' + (error.message || '请重试');
+    }).finally(function () { creatingSession = false; button.disabled = false; });
+  };
   function sendMsg() {
     var input = document.getElementById('hz-input');
     var text = (input.value || '').trim();
-    if (!text || busy) return;
+    if (!text || busy || creatingSession) return;
     if (!curTarget) { alert('会话未就绪'); return; }
     busy = true;
     input.value = '';
@@ -622,19 +550,18 @@
           waited += 3000;
           hzGet(targetQuery(), curTarget.kind === 'niu' ? 30000 : 8000).then(function (d) {
             var ms = d.messages || [];
-            renderMsgs(ms);
-            var lastUser = null;
-            for (var i = ms.length - 1; i >= 0; i--) { if (ms[i].role === 'user') { lastUser = ms[i]; break; } }
-            var hasNewAgent = lastUser && ms[ms.length - 1].role === 'assistant' && ms[ms.length - 1] !== lastUser;
-            if (hasNewAgent || waited >= 90000) {
+            var currentRequest = res.requestId && ((d.status && d.status.requestId === res.requestId) || ms.some(function (m) { return m.id === res.requestId; }));
+            var failed = currentRequest && d.status && (d.status.state === 'error' || d.status.state === 'aborted');
+            var hasNewAgent = currentRequest && ms.length && ms[ms.length - 1].role === 'assistant' && d.status && d.status.state === 'idle';
+            if (failed || hasNewAgent || waited >= 90000) {
               clearInterval(timer);
               busy = false;
-              document.getElementById('hz-chat-status').textContent = hasNewAgent ? '✓ 已回复' : '（回复超时，见完整 GUI）';
+              document.getElementById('hz-chat-status').textContent = failed ? turnFailure(d.status) : hasNewAgent ? '✓ 已回复' : '回复超时，请稍后刷新会话查看。';
               if (hasNewAgent && curTarget && curTarget.kind === 'niu') {
                 var niuMsg = ms[ms.length - 1];
                 fetch('/api/niu/record', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: { 'Content-Type': 'application/json', 'X-Quant-Request':'1' },
                   body: JSON.stringify({ persona: curTarget.persona, text: niuMsg.text, snapshot_date: snapshotDate })
                 }).then(function (r) { return r.json().catch(function () { return {}; }); }).then(function (rec) {
                   if (rec && rec.ok) {
@@ -644,7 +571,8 @@
                 }).catch(function () {});
               }
             }
-          }).catch(function () { busy = false; clearInterval(timer); });
+            renderMsgs(ms, currentRequest && d.status && d.status.state === 'running');
+          }).catch(function () { busy = false; clearInterval(timer); document.getElementById('hz-chat-status').textContent = '读取回复失败，请刷新会话重试。'; });
         }, 3000);
       } else {
         busy = false;
@@ -688,9 +616,13 @@
 
   /* ---------- 状态快照（/api/harness） ---------- */
   function loadHarness() {
-    LW.api.get('/api/harness', { bypass: true }).then(function (d) {
+    fetch('/api/harness', {cache:'no-store'}).then(function (r) { return r.json(); }).then(function (d) {
       if (d.error) {
-        document.getElementById('hz-conn').innerHTML = '<span style="color:var(--red)">快照未就绪：' + R._f(d.error) + '</span>';
+        document.getElementById('hz-conn').textContent = '尚未生成运行快照；聊天连接状态见上方。';
+        document.getElementById('hz-tag').textContent = '暂无快照';
+        document.getElementById('hz-goal').textContent = '暂无任务快照';
+        document.getElementById('hz-rounds').textContent = '暂无轮次快照';
+        document.getElementById('hz-docs').textContent = '暂无快照文档';
         return;
       }
       var h = d.harness || {};
@@ -781,7 +713,7 @@
     btn.textContent = '导入中…';
     fetch('/api/import/install', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Quant-Request':'1' },
       body: JSON.stringify({ type: typ, name: name })
     }).then(function (r) { return r.json(); }).then(function (res) {
       if (res && res.ok) {

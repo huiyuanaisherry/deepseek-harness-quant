@@ -1,0 +1,15 @@
+{
+  "title": "真实观察池",
+  "eyebrow": "WORKSPACE / REAL WATCHLIST",
+  "sampleConfig": "config/real_data_sample.json",
+  "displayLimit": 1000,
+  "financeLimit": 200,
+  "labels": {
+    "watchlist": "真实历史快照 · 小样本观察池",
+    "mainDemo": "主系统：演示数据",
+    "mainCache": "主系统：缓存数据",
+    "mainUnknown": "主系统数据模式未知",
+    "history": "历史快照，非实时行情",
+    "notAccepted": "完整选股、候选池与交易能力尚未验收"
+  }
+}

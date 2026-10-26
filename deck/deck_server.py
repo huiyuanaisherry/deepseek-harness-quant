@@ -23,6 +23,7 @@ API：
   GET  /api/sim         → logs/sim_tracks.json         模拟盘双轨
 """
 import json
+import gzip
 import re
 
 # ★2026-08-13 黑框隐藏（总指挥要求：计划任务/常驻进程不弹黑框，运行完自动关闭不留窗）
@@ -52,6 +53,7 @@ DECISIONS = LOGS / "deck_decisions.json"
 #   读-改-写（读最新 deck_decisions → append → 写新时间戳文件）存在竞争，
 #   并发审批会丢记录（实测 10 并发仅存 4 条）→ 串行化整个决策读写区
 DECIDE_LOCK = threading.Lock()
+DATA_SETTINGS_LOCK = threading.Lock()
 
 
 def _json_safe(o):
@@ -174,19 +176,28 @@ def _resolve_route(path: str) -> Path:
 
 
 
-class Handler(BaseHTTPRequestHandler):
+try:
+    from .web_security import SecurityMixin, contained_path
+    from .model_settings import ModelSettings, DSHClient, SettingsError, proxy_quant, create_chat_session
+    from .real_watchlist import RealWatchlistService, WatchlistError
+except ImportError:  # Direct launcher: python deck/deck_server.py
+    from web_security import SecurityMixin, contained_path
+    from model_settings import ModelSettings, DSHClient, SettingsError, proxy_quant, create_chat_session
+    from real_watchlist import RealWatchlistService, WatchlistError
+
+
+class Handler(SecurityMixin, BaseHTTPRequestHandler):
     # ★2026-08-10 个股检测缓存（类变量：跨请求共享；每请求实例会重置实例属性）
     _sc_cache = {}
 
-    def log_message(self, fmt, *args):
-        sys.stderr.write(f"[deck] {self.address_string()} {fmt % args}\n")
-
-    def _send(self, code: int, body: bytes, ctype: str = "application/json"):
+    def _send(self, code: int, body: bytes, ctype: str = "application/json", extra_headers=None):
         try:
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            for name, value in (extra_headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, TimeoutError):
@@ -201,6 +212,30 @@ class Handler(BaseHTTPRequestHandler):
             pass
         self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"))
 
+    def _send_watchlist_detail(self, obj):
+        """Negotiate gzip only for the larger, private watchlist detail DTO."""
+        body = json.dumps(_json_safe(obj), ensure_ascii=False).encode('utf-8')
+        headers = {'Vary': 'Accept-Encoding'}
+        accepts_gzip = False
+        for entry in self.headers.get('Accept-Encoding', '').split(','):
+            parts = [part.strip().lower() for part in entry.split(';')]
+            if parts[0] != 'gzip':
+                continue
+            quality = 1.0
+            for parameter in parts[1:]:
+                key, separator, value = parameter.partition('=')
+                if key.strip() == 'q':
+                    try:
+                        quality = float(value.strip()) if separator else 0.0
+                    except ValueError:
+                        quality = 0.0
+            if 0.0 < quality <= 1.0:
+                accepts_gzip = True
+        if accepts_gzip and len(body) >= 4096:
+            body = gzip.compress(body, mtime=0)
+            headers['Content-Encoding'] = 'gzip'
+        self._send(200, body, extra_headers=headers)
+
     def _redirect(self, location: str):
         """★U1-4 301 合并：旧页路由 → 新页（浏览器自动跳转，老链接/书签仍可用）"""
         self.send_response(301)
@@ -213,13 +248,118 @@ class Handler(BaseHTTPRequestHandler):
         f = BASE / "ui_v2" / "pages" / name
         return self._send(200, f.read_bytes() if f.exists() else missing_txt.encode("utf-8"), "text/html; charset=utf-8")
 
-    def _read_json(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n <= 0:
-            return {}
-        return json.loads(self.rfile.read(n).decode("utf-8"))
+    def _settings(self):
+        return getattr(self.server, 'model_settings', None) or ModelSettings()
+
+    def _data_settings(self):
+        # One instance per server keeps verification cooldown/concurrency shared.
+        with DATA_SETTINGS_LOCK:
+            service = getattr(self.server, 'data_settings', None)
+            if service is None:
+                try:
+                    from .data_settings import DataSettings
+                except ImportError:
+                    from data_settings import DataSettings
+                service = DataSettings(BASE / 'config' / 'params.yaml',
+                                       metadata_path=BASE / 'config' / 'data_sources.json')
+                self.server.data_settings = service
+            return service
+
+    def _real_watchlist(self):
+        # ★2026-10-25 真实观察池：只读快照服务（revision 计算跨请求复用同一实例）
+        settings = self._data_settings()
+        with DATA_SETTINGS_LOCK:
+            service = getattr(self.server, 'real_watchlist', None)
+            if service is None:
+                service = RealWatchlistService(BASE, data_settings=settings)
+                self.server.real_watchlist = service
+            return service
+
+    def _watchlist_json(self, action: str):
+        import urllib.parse
+        service = self._real_watchlist()
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
+        if action == 'context':
+            return self._send_json(service.context())
+        if action == 'list':
+            return self._send_json(service.list_stocks())
+        prefix = '/api/real-watchlist/stocks/'
+        code = urllib.parse.unquote(self.path.split('?', 1)[0][len(prefix):])
+        adjust = (query.get('adjust') or ['none'])[0]
+        revision = (query.get('revision') or [None])[0]
+        return self._send_watchlist_detail(service.stock_detail(code, adjust, revision or None))
 
     def do_GET(self):
+        if not self._gate():
+            return
+        try:
+            path = self.path.split('?', 1)[0]
+            if path in ('/api/manual_update', '/api/export_data', '/api/live/backtest_run', '/api/data-settings/tushare/verify'):
+                return self._error('METHOD_NOT_ALLOWED', 405)
+            if path == '/real-watchlist':
+                return self._v2_page('real-watchlist.html', 'real watchlist missing')
+            if path == '/api/data-context':
+                return self._watchlist_json('context')
+            if path == '/api/real-watchlist':
+                return self._watchlist_json('list')
+            if path.startswith('/api/real-watchlist/stocks/'):
+                return self._watchlist_json('detail')
+            if path == '/data-settings':
+                return self._v2_page('data-settings.html', 'data settings missing')
+            if path == '/api/data-settings/tushare':
+                return self._send_json(self._data_settings().describe())
+            if path == '/settings':
+                return self._v2_page('settings.html', 'settings missing')
+            if path == '/api/navigation':
+                config = BASE / 'config' / 'navigation.json'
+                if not config.exists():
+                    config = BASE / 'config' / 'navigation.json.example'
+                value = json.loads(config.read_text(encoding='utf-8')) if config.exists() else {}
+                result = {}
+                for group in ('items', 'more'):
+                    result[group] = [{k: row[k] for k in ('id', 'label', 'ic', 'url')} for row in value.get(group, []) if isinstance(row, dict) and all(isinstance(row.get(k), str) for k in ('id', 'label', 'ic', 'url')) and row['url'].startswith('/') and not row['url'].startswith('//') and not any(c in row['url'] for c in ('\\', '\r', '\n'))]
+                return self._send_json(result)
+            if path == '/api/model-settings':
+                return self._send_json(self._settings().describe())
+            if path.startswith('/api/proxy/'):
+                return self._send_json(proxy_quant(self.path, 'GET'))
+            return self._private_GET()
+        except WatchlistError as error:
+            return self._error(error.code, error.status)
+        except SettingsError as error:
+            return self._error(error.code, error.status)
+        except (ValueError, UnicodeError):
+            return self._error('INVALID_PATH', 400)
+        except Exception:
+            return self._error('REQUEST_FAILED', 500)
+
+    def do_POST(self):
+        if not self._gate(write=True):
+            return
+        try:
+            path = self.path.split('?', 1)[0]
+            actions = {'/api/model-settings/provider':'save',
+                       '/api/model-settings/key/remove':'remove_key',
+                       '/api/model-settings/default':'set_default'}
+            if path == '/api/data-settings/tushare':
+                return self._send_json(self._data_settings().save(self._read_json()))
+            if path == '/api/data-settings/tushare/verify':
+                return self._send_json(self._data_settings().verify(self._read_json()))
+            if path == '/api/chat/session':
+                return self._send_json(create_chat_session(self._read_json()))
+            if path in actions:
+                return self._send_json(getattr(self._settings(), actions[path])(self._read_json()))
+            if path.startswith('/api/proxy/'):
+                return self._send_json(proxy_quant(self.path, 'POST', self._read_json()))
+            return self._private_POST()
+        except SettingsError as error:
+            return self._error(error.code, error.status)
+        except (ValueError, UnicodeError):
+            return self._error('INVALID_REQUEST', 400)
+        except Exception:
+            return self._error('REQUEST_FAILED', 500)
+
+    def _private_GET(self):
         path = self.path.split("?")[0]
         if path == "/api/portfolio":     # ★T-2：持仓（strategy/portfolio.py）
             try:
@@ -323,31 +463,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": True, "skills": skills, "presets": presets})
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 500)
-        if path.startswith("/api/proxy/"):   # ★2026-08-16 反向代理 GET → :3080 HARNESS（前端同源访问，零跨源）
-            import urllib.request as _ur
-            import urllib.error as _ue
-            _tgt = "http://127.0.0.1:3080/" + path[len("/api/proxy/"):]
-            if "?" in self.path:
-                _tgt += "?" + self.path.split("?", 1)[1]
-            try:
-                _r = _ur.urlopen(_ur.Request(_tgt), timeout=40)
-                _data = _r.read()
-                try:
-                    return self._send_json(json.loads(_data.decode("utf-8")))
-                except Exception:
-                    self.send_response(_r.status)
-                    self.send_header("Content-Type", _r.headers.get("Content-Type", "application/json"))
-                    self.end_headers()
-                    self.wfile.write(_data)
-                    return
-            except _ue.HTTPError as e:
-                _d = e.read()
-                try:
-                    return self._send_json(json.loads(_d.decode("utf-8")), e.code)
-                except Exception:
-                    return self._send_json({"ok": False, "error": "proxy upstream " + str(e.code)}, e.code)
-            except Exception as e:
-                return self._send_json({"ok": False, "error": "proxy: " + str(e)}, 502)
+
         if path == "/api/subj_quant":   # ★2026-08-14 主观量化融合系统状态（标签+否决+胜率徽章）
             try:
                 sys.path.insert(0, str(BASE))
@@ -418,25 +534,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"ok": True, "strategies": list_strategies()})
             except Exception as e:
                 return self._send_json({"ok": False, "error": str(e)}, 500)
-        if path == "/api/live/backtest_run":   # ★2026-08-14 动态回测（因子页「回测」Tab 按参数即时跑）
-            try:
-                import urllib.parse
-                q = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
-                def _g(k, d):
-                    v = (q.get(k) or [d])[0]
-                    return v
-                sys.path.insert(0, str(BASE))
-                from backtest.bt_runner import run_backtest
-                r = run_backtest(strategy=_g("strategy", "tech3"),
-                                 topn=int(_g("topn", "5")),
-                                 stocks=int(_g("stocks", "300")),
-                                 start=_g("start", "2021-01-01"),
-                                 end=_g("end", "2025-12-31"))
-                return self._send_json({"ok": True, **r})
-            except Exception as e:
-                import traceback as _tb
-                _tb.print_exc()
-                return self._send_json({"ok": False, "error": str(e)}, 500)
         if path == "/dashboard.html":   # ★U1-4 301 合并：旧静态系统看板 → /dashboard_live.html（实时系统状态面板）
             return self._redirect("/dashboard_live.html")
         if path == "/dashboard_opp.html":   # ★2026-08-10 机会池看板（UI A4 核心，总指导落地；glob 取最新时间戳版）
@@ -500,13 +597,6 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json(collect())
             except Exception as e:
                 return self._send_json({"error": str(e)}, 500)
-        if path == "/api/manual_update":   # ★2026-08-10 手动全域更新（POST；自动程序运行中自动拒绝）
-            try:
-                sys.path.insert(0, str(BASE))
-                from data.manual_update import start
-                return self._send_json(start())
-            except Exception as e:
-                return self._send_json({"error": str(e)}, 500)
         if path == "/api/update_status":   # ★2026-08-10 手动更新状态（busy/上次结果/日志）
             try:
                 sys.path.insert(0, str(BASE))
@@ -529,8 +619,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v2" or path == "/v2/":   # ★#366 旧骨架页 → 301 门户（index.html 是"V2 建设中"历史残留，主入口已切 /）
             return self._redirect("/")
         if path.startswith("/v2/"):   # ★2026-08-13 UI v2 静态路由（ui_v2/ 目录——API 驱动静态页，无生成器机制）
-            _rel = path[len("/v2/"):].replace("..", "")
-            f = BASE / "ui_v2" / _rel
+            _rel = path[len("/v2/"):]
+            f = contained_path(BASE / "ui_v2", _rel)
             if f.is_file():
                 _ct = "text/css; charset=utf-8" if _rel.endswith(".css") else (
                     "application/javascript; charset=utf-8" if _rel.endswith(".js") else "text/html; charset=utf-8")
@@ -607,6 +697,8 @@ class Handler(BaseHTTPRequestHandler):
                       "turnlow_top": live_api.live_turnlow_top,   # ★2026-08-15 turn_low 防守主力参考
                       "wufu_rotation": live_api.live_wufu_rotation,   # ★2026-08-16 五福轮动门户摆件
                       "chain_refresh": live_api.live_chain_refresh}[_fn]
+                if _fn == 'endpoints':
+                    return self._send_json(fn(cookie=self.headers.get('Cookie', ''), port=self.server.server_port))
                 return self._send_json(fn())
             except Exception as e:
                 # ★2026-08-14 调试：live API 500 打印完整堆栈（排查 float-datetime）
@@ -616,28 +708,9 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 return self._send_json({"error": str(e)}, 500)
-        if path == "/api/export_data":   # ★2026-08-12 用户需求#179：数据导出中心（Excel + 海报）
-            try:
-                import subprocess as _sp_e, glob as _gl_e
-                _r = _sp_e.run([sys.executable, "-X", "utf8",
-                                str(BASE / "report" / "export_center.py")],
-                               capture_output=True, text=True, timeout=180,
-                               encoding="utf-8", errors="replace")
-                _xf = sorted([Path(x) for x in _gl_e.glob(str(BASE / "output" / "data_export_*.xlsx"))],
-                             key=lambda p: p.stat().st_mtime)
-                _pf = sorted([Path(x) for x in _gl_e.glob(str(BASE / "output" / "data_poster_*.html"))],
-                             key=lambda p: p.stat().st_mtime)
-                return self._send_json({
-                    "ok": _r.returncode == 0,
-                    "excel": _xf[-1].name if _xf else None,
-                    "poster": _pf[-1].name if _pf else None,
-                    "log": (_r.stdout or "").strip().splitlines()[-1] if _r.stdout else "",
-                })
-            except Exception as e:
-                return self._send_json({"error": str(e)}, 500)
         if path.startswith("/dl/"):   # ★2026-08-12 #179：导出文件下载（/dl/data_export_xxx.xlsx）
             _name = path.split("/", 2)[2]
-            _fp = BASE / "output" / _name
+            _fp = contained_path(BASE / "output", _name)
             if _fp.exists():
                 _ct = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"                     if _name.endswith(".xlsx") else "text/html; charset=utf-8"
                 return self._send(200, _fp.read_bytes(), _ct)
@@ -749,34 +822,46 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"error": str(e)}, 500)
         return self._send_json({"error": f"未知路由 {path}"}, 404)
 
-    def do_POST(self):
+    def _private_POST(self):
         path = self.path.split("?")[0]
-        if path.startswith("/api/proxy/"):   # ★2026-08-16 反向代理 POST → :3080（删除/批量/清空/发送全走这里）
-            import urllib.request as _ur
-            import urllib.error as _ue
-            _tgt = "http://127.0.0.1:3080/" + path[len("/api/proxy/"):]
+        if path == "/api/live/backtest_run":   # ★2026-08-14 动态回测（因子页「回测」Tab 按参数即时跑）
             try:
-                _body = self._read_json()
-                _req = _ur.Request(_tgt, data=json.dumps(_body).encode("utf-8"),
-                                   headers={"Content-Type": "application/json"})
-                _r = _ur.urlopen(_req, timeout=60)
-                _data = _r.read()
-                try:
-                    return self._send_json(json.loads(_data.decode("utf-8")))
-                except Exception:
-                    self.send_response(_r.status)
-                    self.send_header("Content-Type", _r.headers.get("Content-Type", "application/json"))
-                    self.end_headers()
-                    self.wfile.write(_data)
-                    return
-            except _ue.HTTPError as e:
-                _d = e.read()
-                try:
-                    return self._send_json(json.loads(_d.decode("utf-8")), e.code)
-                except Exception:
-                    return self._send_json({"ok": False, "error": "proxy upstream " + str(e.code)}, e.code)
+                import urllib.parse
+                q = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                def _g(k, d):
+                    v = (q.get(k) or [d])[0]
+                    return v
+                sys.path.insert(0, str(BASE))
+                from backtest.bt_runner import run_backtest
+                r = run_backtest(strategy=_g("strategy", "tech3"),
+                                 topn=int(_g("topn", "5")),
+                                 stocks=int(_g("stocks", "300")),
+                                 start=_g("start", "2021-01-01"),
+                                 end=_g("end", "2025-12-31"))
+                return self._send_json({"ok": True, **r})
             except Exception as e:
-                return self._send_json({"ok": False, "error": "proxy: " + str(e)}, 502)
+                import traceback as _tb
+                _tb.print_exc()
+                return self._send_json({"ok": False, "error": str(e)}, 500)
+        if path == "/api/export_data":   # ★2026-08-12 用户需求#179：数据导出中心（Excel + 海报）
+            try:
+                import subprocess as _sp_e, glob as _gl_e
+                _r = _sp_e.run([sys.executable, "-X", "utf8",
+                                str(BASE / "report" / "export_center.py")],
+                               capture_output=True, text=True, timeout=180,
+                               encoding="utf-8", errors="replace")
+                _xf = sorted([Path(x) for x in _gl_e.glob(str(BASE / "output" / "data_export_*.xlsx"))],
+                             key=lambda p: p.stat().st_mtime)
+                _pf = sorted([Path(x) for x in _gl_e.glob(str(BASE / "output" / "data_poster_*.html"))],
+                             key=lambda p: p.stat().st_mtime)
+                return self._send_json({
+                    "ok": _r.returncode == 0,
+                    "excel": _xf[-1].name if _xf else None,
+                    "poster": _pf[-1].name if _pf else None,
+                    "log": (_r.stdout or "").strip().splitlines()[-1] if _r.stdout else "",
+                })
+            except Exception as e:
+                return self._send_json({"error": str(e)}, 500)
         if path == "/api/import/install":   # ★2026-08-16 导入 skill / agent 预设（assets → 运行库）
             try:
                 rec = self._read_json()

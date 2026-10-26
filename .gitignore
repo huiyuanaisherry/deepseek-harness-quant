@@ -56,3 +56,11 @@ harness/home/profiles/node_modules/
 # ---- 内部维护文档（含本机路径，不进公开仓库） ----
 docs/上传GitHub.md
 docs/发布清单_v1.0.9.md
+
+# Private orchestration and local web authentication
+.superpowers/
+**/.quant-web-token
+**/.quant-web-token.*
+
+# Private bounded real market validation artifacts
+data/real-smoke/

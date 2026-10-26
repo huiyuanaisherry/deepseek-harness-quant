@@ -3,28 +3,25 @@
    active item: #5e6ad2 left border + rgba(94,106,210,.2)→#1c1c22 bg.
    底部：数据日 + 择时（读 portal_dash，LW.api 冗余兜底） */
 (function () {
-  var ITEMS = [
-    { id: 'portal',   label: '门户',   ic: 'home',     url: '/' },
-    { id: 'control',  label: '控制',   ic: 'cpu',      url: '/control' },
-    { id: 'pitch',    label: '决策',   ic: 'target',   url: '/pitch' },
-    { id: 'holdings', label: '持仓',   ic: 'bar',      url: '/holdings' },
-    { id: 'factors',  label: '因子',   ic: 'molecule', url: '/factors' },
-    { id: 'backtest', label: '回测',   ic: 'chart',    url: '/backtest' },
-    { id: 'pitchtrack', label: '远期', ic: 'funnel', url: '/pitchtrack' }
-  ];
+  var ITEMS = [];
   // ★P2 菜单收敛（2026-08-15）：主菜单 6 项（门户/控制/决策/持仓/因子/回测）+「更多」分组（日报/数据/说明）
-  var MORE = [
-    { id: 'report',  label: '日报', ic: 'doc',  url: '/report' },
-    { id: 'data',    label: '数据', ic: 'db',   url: '/data' },
-    { id: 'help',    label: '说明', ic: 'help', url: '/help' }
-  ];
+  var MORE = [];
 
   window.LW = window.LW || {};
   LW.sidebar = {
     render: function (elId, opts) {
+      if (!(opts && opts._navigationLoaded)) {
+        LW.api.get("/api/navigation").then(function (data) {
+          ITEMS = data.items || []; MORE = data.more || [];
+          LW.sidebar.render(elId, Object.assign({}, opts, {_navigationLoaded:true}));
+          window.dispatchEvent(new Event("quant-sidebar-ready"));
+        }).catch(function () { var el=document.getElementById(elId); if(el) el.textContent="导航加载失败，请刷新页面。"; });
+        return;
+      }
       var el = document.getElementById(elId);
       if (!el) return;
       var IC = LW.icons || {};
+      function escape(value) { return String(value).replace(/[&<>"']/g, function(c) { return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"}[c]; }); }
       var active = (opts && opts.active) || 'portal';
       var html =
         '<div class="sb">' +
@@ -34,7 +31,7 @@
           '<nav class="sb-nav">' +
             ITEMS.map(function (it) {
               var cls = it.id === active ? 'sb-item active' : 'sb-item';
-              return '<a class="' + cls + '" href="' + it.url + '">' + (IC[it.ic] || '') + it.label + '</a>';
+              return '<a class="' + cls + '" href="' + escape(it.url) + '">' + (IC[it.ic] || '') + escape(it.label) + '</a>';
             }).join('') +
             /* ★2026-08-16 「更多」默认折叠：点击标签展开（grid-rows 动画），箭头旋转指示 */
             '<div class="sb-sub-label sb-more-toggle" id="' + elId + '-more-toggle" title="展开/收起更多">' +
@@ -43,12 +40,14 @@
               '<div style="overflow:hidden">' +
                 MORE.map(function (it) {
                   var cls = it.id === active ? 'sb-item active sb-sub-item' : 'sb-item sb-sub-item';
-                  return '<a class="' + cls + '" href="' + it.url + '">' + (IC[it.ic] || '') + it.label + '</a>';
+                  return '<a class="' + cls + '" href="' + escape(it.url) + '">' + (IC[it.ic] || '') + escape(it.label) + '</a>';
                 }).join('') +
               '</div>' +
             '</div>' +
           '</nav>' +
           '<div class="sb-search" id="' + elId + '-srch"></div>' +
+          /* ★2026-10-25 主系统数据模式：来源由 /api/data-context 提供，未知绝不默认真实 */
+          '<div class="sb-datamode" id="' + elId + '-datamode" data-mode="unknown">主系统数据模式未知</div>' +
           '<div class="sb-foot" id="' + elId + '-foot">' +
             '<span class="sb-mini">数据日 …</span>' +
             '<span class="sb-mini">择时 …</span>' +
@@ -91,17 +90,52 @@
           badge.title = bm.hint || '内部测试构建，非公测发布版';
         }
       }).catch(function () {});
+      // ★2026-10-25 主系统数据模式（demo/cache/unknown）：只显示服务端判定，失败保持未知
+      LW.api.get('/api/data-context', {strict: true, retry: 0}).then(function (ctx) {
+        var box = document.getElementById(elId + '-datamode');
+        if (!box) return;
+        var main = (ctx && ctx.main) || {};
+        var mode = main.mode === 'demo' || main.mode === 'cache' ? main.mode : 'unknown';
+        box.textContent = typeof main.label === 'string' && main.label ? main.label : '主系统数据模式未知';
+        box.title = typeof main.note === 'string' ? main.note : '';
+        box.setAttribute('data-mode', mode);
+      }).catch(function () {
+        var box = document.getElementById(elId + '-datamode');
+        if (!box) return;
+        box.textContent = '主系统数据模式未知';
+        box.title = '无法读取主系统数据配置，不能判定当前数据来源。';
+        box.setAttribute('data-mode', 'unknown');
+      });
       LW.api.get('/api/live/portal_dash').then(function (d) {
         var tm = (d.timing && d.timing.timing) || {};
         var dd = d.data_date || (d.brief && d.brief.date) || tm.date || '';
         var f = document.getElementById(elId + '-foot');
         if (!f) return;
-        var sc = tm.score != null ? tm.score : '…';
+        // ★2026-10-26 Task 2：只有加载了 portal_status.js 的页面才启用模块状态判断，
+        // 其余页面（sidebar 全站共用）保持原有数值渲染，避免把正常数值降级为“状态未知”。
+        var ps = window.LW && window.LW.portalStatus;
+        if (ps) {
+          var view = ps.moduleView(d.modules, 'timing');
+          if (!view || view.known !== true) {
+            f.innerHTML = '<span class="sb-mini">数据日 ' + (dd || '—') + '</span>' +
+              '<span class="sb-mini">状态未知：接口未提供模块状态</span>';
+            return;
+          }
+          if (view.showValue !== true) {
+            f.innerHTML = '<span class="sb-mini">数据日 ' + (dd || '—') + '</span>' +
+              '<span class="sb-mini" title="' + ps.reasonText(view.reason) + '">择时 ' + view.label + '</span>';
+            return;
+          }
+        }
+        var sc = tm.score != null ? tm.score : '—';
         var lv = tm.level || '';
         f.innerHTML =
           '<span class="sb-mini">数据日 ' + dd + '</span>' +
           '<span class="sb-mini">择时 ' + sc + (lv ? ' · ' + lv : '') + '</span>';
-      }).catch(function () {});
+      }).catch(function () {
+        var f = document.getElementById(elId + '-foot');
+        if (f) f.innerHTML = '<span class="sb-mini">状态未知 · 接口不可达</span>';
+      });
     }
   };
 })();
@@ -146,6 +180,7 @@
       document.addEventListener('mouseup', up);
     });
   }
+  window.addEventListener('quant-sidebar-ready', initResize);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initResize);
   else initResize();
 })();
@@ -198,6 +233,7 @@
     open.style.display = saved === '1' ? 'flex' : 'none';
     setTimeout(function () { busy = false; }, 260);
   }
+  window.addEventListener('quant-sidebar-ready', initFold);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initFold);
   else initFold();
 })();
