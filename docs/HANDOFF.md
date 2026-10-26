@@ -201,3 +201,15 @@ GitHub HTTPS 推送没有凭据；origin 的 push URL 已改为 SSH，`ssh -T gi
 - **Windows 未部署**：`jack@100.123.203.13` 与 `jack@192.168.31.86` SSH 均 `Permission denied (publickey)`，而 `http://100.123.203.13:8787/login` 返回 200，判断为 Windows OpenSSH 公钥授权丢失（本机公钥 `codex-ai-workbench`）。用户本轮选择先跳过部署。因此 `http://100.123.203.13:8787/real-watchlist` 尚未包含本期页面，Windows 测试重跑、真实六只页面验收、只读哈希核对均未执行。
 - 恢复部署时：把 `8edfe1d` 打包为 Git bundle，SSH 传输后在 `deployment/privacy-provider-settings` 严格核对 SHA 并快进；部署前后保存 `config/params.yaml`、`harness/home/settings.yaml` 的 SHA256（不输出内容）与 `data/demo`、`data/real-smoke` 文件哈希；重启 `deepseek-quant.service`；Windows 用 `/home/jack/.local/opt/node22/bin/node` 重跑 Python/Node 测试；管理会话核对页面、JS、三个接口均 200 后注销；Mac Chrome 经 Tailscale 访问并对比只读哈希；其他业务页仍应显示演示模式。
 - 遗留审查意见（低优先级）：`context()` 复用 `_rows` 全量读取，侧栏每次加载较重，可加短缓存或轻量摘要；`config/real_watchlist.json` 的 `sampleConfig` 未校验 root 前缀（只从项目配置读取，风险低）。
+
+## 观察池修复与 Windows 发布（2026-10-26，覆盖上文未部署状态）
+
+- 用户授权接手修复。`e68213b` 完成RW-01～06；`5483b8e` 修复实际浏览器超时恢复状态；`8198b0687758aa882fa1d207f5fc0208843b5742` 增加仅详情JSON协商gzip，为当前部署功能提交。文档后续提交不改功能。
+- Windows SSH 使用1、公钥配置正常；WSL用jack。已通过verified Git bundle在deployment/privacy-provider-settings快进，回滚分支deployment-before-real-watchlist-20261026指向7fd486c。未合并master，PR1沿用。
+- 正式地址 http://100.123.203.13:8787/real-watchlist 。主系统仍为data/demo，观察池显式只读data/real-smoke/sample。两项服务active，仅Python重启；DSH MainPID未变。
+- 全部后端、前端及压缩改动均独立复审通过。Windows103Python+66Node全过；本地Python103项含1项可选SDK跳过。新增故障回归与现有测试均通过。
+- 已认证HTTP核验页面/脚本/模式/列表和六只×none/qfq十二个详情，全部正常；asOf2026-10-23、技术指标可用、strategyAcceptance=false。gzip实测119356→28689字节，解压后484条完整。
+- 配置params.yaml、模型settings.yaml以及demo/real-smoke共58文件SHA256前后完全一致。没有采集、切换生产目录或写行情库，没有修改Token。
+- 浏览器验收部分完成：内置浏览器真实六只列表、紫光股份484行情/8财务/通过状态、浪潮信息详情已出现；复权切换及最终压缩版本完整复测未完成。Chrome插件连接策略错误，内置浏览器/网络后续超时。当前Tailscale经香港DERP，未建立直连，SSH也偶发连接超时；不能标记完整浏览器验收通过，也没有成功截图。
+- 曾尝试仅Mac loopback绑定18787的临时SSH隧道，未能完成浏览器复测，已Ctrl-C终止；它不是部署依赖，用户仍使用100.123.203.13访问。ShieldsUp与网络安全设置均未改变。
+- 后续只需在网络稳定后补Chrome正式URL的六只选择、复权/刷新、来源标签和截图验收；无需重做六项代码修复或Token配置。完整选股仍按需求文档补历史ST、季度财务、估值分位与外部因子。
