@@ -96,7 +96,7 @@ class Fixture(unittest.TestCase):
                 'suspension_verification_mode': 'none', 'repeat_write_readback': True,
                 'expected_count': 2, 'observed_count': 2}
             readiness['symbols'][code] = {
-                'status': 'technical_ready',
+                'status': 'technical_ready', 'history_count': 2, 'latest_date': '2026-10-23',
                 'technical_factors': {key: 1.5 for key in TECHNICAL}}
         (self.sample / 'verification.json').write_text(json.dumps(report, ensure_ascii=False), encoding='utf-8')
         (self.sample / 'strategy_readiness.json').write_text(json.dumps(readiness, ensure_ascii=False), encoding='utf-8')
@@ -110,6 +110,97 @@ class Fixture(unittest.TestCase):
 
 
 class ServiceTests(Fixture):
+    def test_actual_asof_is_not_query_cutoff(self):
+        path = self.sample / 'verification.json'
+        report = json.loads(path.read_text())
+        report['as_of'] = '20261025'
+        path.write_text(json.dumps(report))
+        for value in (self.service.list_stocks(), self.service.stock_detail('000001.SZ', 'none')):
+            self.assertEqual(value['source']['asOf'], '2026-10-23')
+            self.assertEqual(value['source']['queryCutoff'], '2026-10-25')
+        self.assertEqual(self.service.context()['watchlist']['asOf'], '2026-10-23')
+
+    def test_stale_verification_rejects_changed_coverage(self):
+        for mutation in (
+            "DELETE FROM daily_bar WHERE code='000001.SZ' AND date='2026-10-23'",
+            "UPDATE daily_bar SET date='2026-10-24' WHERE code='000001.SZ' AND date='2026-10-23'",
+            "INSERT INTO daily_bar SELECT code, '2026-10-24', open, high, low, close, preclose, volume, amount, turn, pct_chg, is_st, adjust, source FROM daily_bar WHERE code='000001.SZ' AND date='2026-10-23'",
+        ):
+            with self.subTest(mutation=mutation):
+                (self.sample / 'bars.db').unlink()
+                self.make_snapshot()
+                with sqlite3.connect(self.sample / 'bars.db') as connection:
+                    connection.execute(mutation)
+                for read in (self.service.list_stocks, lambda: self.service.stock_detail('000001.SZ', 'qfq')):
+                    with self.assertRaises(WatchlistError) as caught:
+                        read()
+                    self.assertEqual(caught.exception.code, 'SNAPSHOT_CHANGED')
+
+    def test_readiness_coverage_must_match_before_serving_technical(self):
+        path = self.sample / 'strategy_readiness.json'
+        original = json.loads(path.read_text())
+        for key, value in (('history_count', 1), ('latest_date', '2026-10-22')):
+            report = json.loads(json.dumps(original))
+            report['symbols']['000001.SZ'][key] = value
+            path.write_text(json.dumps(report))
+            with self.assertRaises(WatchlistError) as caught:
+                self.service.stock_detail('000001.SZ', 'none')
+            self.assertEqual(caught.exception.code, 'SNAPSHOT_CHANGED')
+        original['symbols']['000001.SZ'].pop('history_count')
+        path.write_text(json.dumps(original))
+        self.assertFalse(self.service.stock_detail('000001.SZ', 'none')['technical']['available'])
+        path.unlink()
+        detail = self.service.stock_detail('000001.SZ', 'qfq')
+        self.assertTrue(detail['verification']['passed'])
+        self.assertFalse(detail['technical']['available'])
+
+    def test_qfq_only_coverage_change_invalidates_list_and_detail(self):
+        with sqlite3.connect(self.sample / 'bars.db') as connection:
+            connection.execute("DELETE FROM daily_bar WHERE code='000001.SZ' AND adjust='qfq' AND date='2026-10-23'")
+        for read in (self.service.list_stocks, lambda: self.service.stock_detail('000001.SZ', 'none')):
+            with self.assertRaises(WatchlistError) as caught:
+                read()
+            self.assertEqual(caught.exception.code, 'SNAPSHOT_CHANGED')
+
+    def test_sqlite_sidecar_symlinks_are_rejected_before_open(self):
+        outside = self.root / 'outside-wal'
+        outside.write_bytes(b'private synthetic sidecar')
+        (self.sample / 'bars.db-wal').symlink_to(outside)
+        with patch.object(self.service, '_connect', side_effect=AssertionError('unsafe open')):
+            with self.assertRaises(WatchlistError) as caught:
+                self.service.list_stocks()
+        self.assertEqual(caught.exception.code, 'SAMPLE_UNAVAILABLE')
+
+    def test_failed_verification_does_not_enable_technical(self):
+        self.make_snapshot(verification_failed={'000001.SZ'})
+        detail = self.service.stock_detail('000001.SZ', 'none')
+        self.assertFalse(detail['verification']['passed'])
+        self.assertFalse(detail['technical']['available'])
+
+    def test_wal_changes_reject_old_revision_without_opening_database(self):
+        writer = sqlite3.connect(self.sample / 'bars.db')
+        try:
+            self.assertEqual(writer.execute('PRAGMA journal_mode=WAL').fetchone()[0], 'wal')
+            sample, out, _, _, _, revision = self.service._open_snapshot()
+            main_stat = (self.sample / 'bars.db').stat()
+            writer.execute("UPDATE daily_bar SET close=99 WHERE code='000001.SZ'")
+            writer.commit()
+            current_stat = (self.sample / 'bars.db').stat()
+            self.assertEqual((main_stat.st_size, main_stat.st_mtime_ns),
+                             (current_stat.st_size, current_stat.st_mtime_ns))
+            self.assertNotEqual(self.service._revision(sample, out), revision)
+            before = self.digest()
+            with patch.object(self.service, '_connect', side_effect=AssertionError('must reject before opening')):
+                with self.assertRaises(WatchlistError) as caught:
+                    self.service.stock_detail('000001.SZ', 'none', revision)
+                self.assertEqual(caught.exception.code, 'SNAPSHOT_CHANGED')
+                with self.assertRaises(WatchlistError) as caught:
+                    self.service.list_stocks()
+                self.assertEqual(caught.exception.code, 'SAMPLE_UNAVAILABLE')
+            self.assertEqual(before, self.digest())
+        finally:
+            writer.close()
+
     def test_context_keeps_main_demo_and_watchlist_real_separate(self):
         value = self.service.context()
         self.assertTrue(value['ok'])
@@ -210,17 +301,21 @@ class ServiceTests(Fixture):
 
     def test_reads_use_parameterized_readonly_sql_without_dailycache(self):
         calls = []
+        statements = []
         real_connect = sqlite3.connect
 
         def spy(database, *args, **kwargs):
             calls.append(str(database))
-            return real_connect(database, *args, **kwargs)
+            connection = real_connect(database, *args, **kwargs)
+            connection.set_trace_callback(statements.append)
+            return connection
 
         with patch('deck.real_watchlist.sqlite3.connect', side_effect=spy), \
                 patch.object(DailyCache, '__init__', side_effect=AssertionError('DailyCache write')):
             self.service.list_stocks()
             self.service.stock_detail('000001.SZ', 'none')
         self.assertTrue(calls)
+        self.assertEqual(statements.count('BEGIN'), len(calls))
         for uri in calls:
             self.assertIn('mode=ro', uri)
             self.assertNotIn('immutable', uri)

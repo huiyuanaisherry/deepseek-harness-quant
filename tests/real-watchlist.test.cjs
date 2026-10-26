@@ -394,7 +394,7 @@ test('detail 409 reloads list once and clears the old chart before retrying',asy
   assert.match(harness.els['wl-chart'].innerHTML,/<svg/);
 });
 
-test('a successful list reload resets the conflict budget for the next detail read',async function(){
+test('automatic list success preserves the conflict budget until consistent detail succeeds',async function(){
   let lists=0,details=0;
   const harness=setup(function(url){
     if(url==='/api/data-context') return ctx();
@@ -408,13 +408,14 @@ test('a successful list reload resets the conflict budget for the next detail re
     return detailDto('000938.SZ','none','r2');
   });
   for(let i=0;i<8;i+=1) await flush();
-  assert.equal(lists,3);
-  assert.equal(details,2);
-  assert.match(harness.els['wl-chart'].innerHTML,/<svg/);
-  assert.ok(!harness.els['wl-status'].textContent.includes('稍后刷新'));
+  assert.equal(lists,2);
+  assert.equal(details,1);
+  assert.equal(harness.els['wl-chart'].innerHTML,'');
+  assert.match(harness.els['wl-status'].textContent,/稍后刷新/);
+  assert.equal(harness.els['wl-retry'].hidden,false);
 });
 
-test('data-context failure keeps both modes unknown instead of claiming real data',async function(){
+test('data-context failure leaves successful list as source authority',async function(){
   const harness=setup(function(url){
     if(url==='/api/data-context') throw {status:500};
     return listDto('r1',[okStock]);
@@ -423,7 +424,7 @@ test('data-context failure keeps both modes unknown instead of claiming real dat
   const e=harness.els;
   assert.equal(e['wl-main-source'].textContent,'主系统数据模式未知');
   assert.equal(e['wl-main-card'].attrs['data-mode'],'unknown');
-  assert.equal(e['wl-source-label'].textContent,'此页：真实历史快照状态未知');
+  assert.equal(e['wl-source-label'].textContent,'此页：真实历史快照 · 小样本观察池');
   assert.match(e['wl-main-note'].textContent,/不默认为真实数据/);
   assert.equal(e['wl-source-label'].textContent.includes('演示'),false);
 });
@@ -485,4 +486,59 @@ test('page markup states strategy is not accepted and never hardcodes sample sym
     for(const symbol of symbols) assert.equal(text.includes(symbol),false,symbol+' should come from config only');
     for(const name of names) assert.equal(text.includes(name),false,name+' should come from config only');
   }
+});
+
+
+test('continuous detail 409 stops after one automatic list reload',async function(){
+  let lists=0,details=0;
+  const h=setup(url=>{
+    if(url==='/api/data-context') return ctx();
+    if(url==='/api/real-watchlist'){lists++;if(lists>4) return new Promise(()=>{});return listDto('r'+lists,[okStock]);}
+    details++;throw {status:409};
+  });
+  for(let i=0;i<12;i++) await flush();
+  assert.equal(lists,2);assert.equal(details,2);
+  assert.match(h.els['wl-status'].textContent,/稍后刷新/);
+  assert.equal(h.els['wl-retry'].hidden,false);
+});
+
+for(const removal of [false,true]) test('refresh invalidates pending detail before '+(removal?'selected stock removal':'empty list'),async function(){
+  const old=deferred(),newList=deferred();let lists=0;
+  const replacement=stock('000977.SZ','浪潮信息','ok');
+  const h=setup(url=>{
+    if(url==='/api/data-context') return ctx();
+    if(url==='/api/real-watchlist') return ++lists===1?listDto('r1',[okStock]):newList.promise;
+    if(url.includes('000938.SZ')) return old.promise;
+    return detailDto(replacement.code,'none','r2');
+  });
+  await flush();await flush();h.els['wl-refresh'].onclick();await flush();
+  assert.equal(h.els['wl-detail-body'].hidden,true);
+  newList.resolve(listDto('r2',removal?[replacement]:[]));await flush();await flush();
+  old.resolve(detailDto(okStock.code,'none','r1'));await flush();
+  assert.ok(!h.els['wl-stock-title'].textContent.includes(okStock.code));
+  if(removal) assert.match(h.els['wl-stock-title'].textContent,/000977/);
+  else {assert.equal(h.els['wl-detail-body'].hidden,true);assert.equal(h.els['wl-chart'].innerHTML,'');}
+});
+
+test('late context cannot restore source or scope after list 503',async function(){
+  const pending=deferred();
+  const h=setup(url=>{if(url==='/api/data-context') return pending.promise;throw {status:503};});
+  await flush();await flush();pending.resolve(ctx());await flush();
+  assert.equal(h.els['wl-source-label'].textContent,'此页：真实历史快照不可用');
+  assert.equal(h.els['wl-source-asof'].textContent,'实际截至日未知');
+  assert.ok(!h.els['wl-scope'].textContent.includes('240'));
+});
+
+for(const failure of [false,true]) test('old context '+(failure?'failure':'success')+' cannot override refreshed context',async function(){
+  const old=deferred();let contexts=0;
+  const h=setup((url,opts)=>{
+    if(url==='/api/data-context') return ++contexts===1?old.promise:ctx({main:{mode:'cache',label:'新主系统来源'}});
+    if(url==='/api/real-watchlist') return listDto('r1',[okStock]);
+    return detailDto(okStock.code,'none','r1');
+  });
+  await flush();await flush();h.els['wl-refresh'].onclick();await flush();await flush();
+  if(failure) old.reject({status:503});else old.resolve(ctx());await flush();
+  assert.equal(h.els['wl-main-source'].textContent,'新主系统来源');
+  const contextCalls=h.calls.filter(c=>c.url==='/api/data-context');
+  assert.equal(contextCalls[1].opts.bypass,true);
 });

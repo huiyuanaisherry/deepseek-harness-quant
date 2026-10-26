@@ -103,7 +103,7 @@
   var ADJUSTS = {none: '未复权', qfq: '前复权'};
   var state = {
     revision: null, stocks: [], source: null, code: null, adjust: 'none',
-    listSeq: 0, detailSeq: 0, snapshotRetries: 0, retry: null
+    listSeq: 0, detailSeq: 0, contextSeq: 0, snapshotRetries: 0, retry: null
   };
 
   function $(id) { return document.getElementById(id); }
@@ -148,28 +148,29 @@
     var watch = (context && context.watchlist) || {};
     text('wl-title', page.title || '真实观察池');
     text('wl-eyebrow', page.eyebrow || 'WORKSPACE / REAL WATCHLIST');
-    text('wl-source-label', watch.label || '此页：真实历史快照状态未知');
-    text('wl-source-asof', watch.asOf ? '实际截至 ' + watch.asOf : '实际截至日未知');
     text('wl-main-source', main.label || '主系统数据模式未知');
     text('wl-main-note', main.note || '无法读取主系统数据配置，不能判定当前数据来源，也不默认为真实数据。');
     var card = $('wl-main-card');
     if (card) card.setAttribute('data-mode', main.mode === 'demo' || main.mode === 'cache' ? main.mode : 'unknown');
-    var scope = watch.scope || {};
-    var parts = [];
-    if (scope.symbols) parts.push(scope.symbols + ' 只样本');
-    if (scope.bars !== null && scope.bars !== undefined) parts.push(scope.bars + ' 条行情');
-    if (scope.financeRows !== null && scope.financeRows !== undefined) parts.push(scope.financeRows + ' 条财务');
-    if (scope.latestDate) parts.push('最新交易日 ' + scope.latestDate);
-    if (watch.verification && watch.verification.status) {
-      parts.push(watch.verification.status === 'passed' ? '采集校验通过' : '采集校验未全部通过');
-    }
-    text('wl-scope', parts.length ? parts.join(' · ') : '小样本历史快照');
     var notes = $('wl-notes');
     if (notes) {
       notes.replaceChildren();
       (watch.notes || []).forEach(function (note) { notes.appendChild(make('li', null, note)); });
       if (!(watch.notes || []).length) notes.appendChild(make('li', null, '历史快照，非实时行情'));
     }
+  }
+
+  function renderScope(dto) {
+    var scope = dto.scope || {};
+    var parts = [];
+    if (scope.symbols) parts.push(scope.symbols + ' 只样本');
+    if (scope.bars !== null && scope.bars !== undefined) parts.push(scope.bars + ' 条行情');
+    if (scope.financeRows !== null && scope.financeRows !== undefined) parts.push(scope.financeRows + ' 条财务');
+    if (scope.latestDate) parts.push('最新交易日 ' + scope.latestDate);
+    if (dto.verification && dto.verification.status) {
+      parts.push(dto.verification.status === 'passed' ? '采集校验通过' : '采集校验未全部通过');
+    }
+    text('wl-scope', parts.length ? parts.join(' · ') : '小样本历史快照');
   }
 
   function renderList() {
@@ -429,7 +430,7 @@
   }
 
   function loadDetail() {
-    if (!state.code) {
+    if (!state.code || !findStock(state.code)) {
       showDetailMessage('观察池暂无可用股票。');
       return;
     }
@@ -440,7 +441,8 @@
               '?adjust=' + encodeURIComponent(adjust) +
               (revision ? '&revision=' + encodeURIComponent(revision) : '');
     LW.api.get(url, {strict: true, retry: 0, bypass: true, timeout: 15000}).then(function (dto) {
-      if (seq !== state.detailSeq) return;
+      if (seq !== state.detailSeq || code !== state.code || adjust !== state.adjust ||
+          revision !== state.revision || !findStock(code)) return;
       if (!dto || dto.ok !== true || !dto.stock || dto.stock.code !== code ||
           !dto.adjust || dto.adjust.value !== adjust) {
         throw new Error('BAD_RESPONSE');
@@ -449,7 +451,8 @@
       state.snapshotRetries = 0;
       renderDetail(dto);
     }).catch(function (error) {
-      if (seq !== state.detailSeq) return;
+      if (seq !== state.detailSeq || code !== state.code || adjust !== state.adjust ||
+          revision !== state.revision || !findStock(code)) return;
       if (error && error.status === 409) {
         if (reloadSnapshot('快照正在更新，正在重新加载。')) return;
       }
@@ -459,7 +462,7 @@
       clearDetail();
       showDetailMessage(message);
       setStatus(message, 'error');
-      showRetry(function () { loadContext(); loadList(true); });
+      showRetry(function () { refresh(); });
     });
   }
 
@@ -485,13 +488,14 @@
     loadDetail();
   }
 
-  function loadContext() {
-    return LW.api.get('/api/data-context', {strict: true, retry: 0, timeout: 6000}).then(function (context) {
+  function loadContext(force) {
+    var seq = ++state.contextSeq;
+    return LW.api.get('/api/data-context', {strict: true, retry: 0, bypass: !!force, timeout: 6000}).then(function (context) {
+      if (seq !== state.contextSeq) return;
       if (!context || context.ok !== true) throw new Error('BAD_RESPONSE');
       renderContext(context);
     }).catch(function () {
-      text('wl-source-label', '此页：真实历史快照状态未知');
-      text('wl-source-asof', '实际截至日未知');
+      if (seq !== state.contextSeq) return;
       text('wl-main-source', '主系统数据模式未知');
       text('wl-main-note', '无法读取主系统数据配置，不能判定当前数据来源，也不默认为真实数据。');
       var card = $('wl-main-card');
@@ -501,6 +505,17 @@
 
   function loadList(force) {
     var seq = ++state.listSeq;
+    state.detailSeq += 1;
+    state.stocks = [];
+    state.revision = null;
+    renderList();
+    clearDetail();
+    text('wl-stock-title', '');
+    text('wl-stock-meta', '');
+    showDetailMessage('正在读取观察池列表，旧详情已清除。');
+    text('wl-source-label', '此页：真实历史快照正在读取');
+    text('wl-source-asof', '实际截至日待确认');
+    text('wl-scope', '样本范围待确认');
     setStatus(force ? '正在刷新观察池数据…' : '正在加载观察池数据…');
     showRetry(null);
     var options = force ? {strict: true, retry: 0, bypass: true, timeout: 15000}
@@ -509,14 +524,13 @@
       if (seq !== state.listSeq) return null;
       if (!dto || dto.ok !== true || !Array.isArray(dto.stocks)) throw new Error('BAD_RESPONSE');
       state.revision = dto.revision;
-      state.snapshotRetries = 0;
       state.stocks = dto.stocks;
       state.source = dto.source || null;
       renderSource(state.source);
+      renderScope(dto);
       renderListStatus();
       if (!findStock(state.code)) {
         state.code = preferredCode();
-        state.snapshotRetries = 0;
       }
       renderList();
       if (state.code) loadDetail();
@@ -534,6 +548,7 @@
       renderList();
       text('wl-source-label', '此页：真实历史快照不可用');
       text('wl-source-asof', '实际截至日未知');
+      text('wl-scope', '样本范围不可用');
       setStatus(message, 'error');
       showDetailMessage(message);
       showRetry(function () { refresh(); });
@@ -544,7 +559,7 @@
   function refresh() {
     state.snapshotRetries = 0;
     showRetry(null);
-    loadContext();
+    loadContext(true);
     loadList(true);
   }
 

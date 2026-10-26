@@ -186,6 +186,7 @@ class RealWatchlistService:
     def _connect(self, db):
         if not db.is_file():
             raise WatchlistError('SAMPLE_UNAVAILABLE', 503, '真实快照数据库不存在。')
+        self._require_stable_journal(db)
         try:
             connection = sqlite3.connect(db.as_uri() + '?mode=ro', uri=True, timeout=2.0)
         except sqlite3.Error:
@@ -195,7 +196,21 @@ class RealWatchlistService:
             connection.execute('PRAGMA busy_timeout = 1500')
         except sqlite3.Error:
             pass
+        connection.execute('BEGIN')
         return connection
+
+    @staticmethod
+    def _require_stable_journal(db):
+        # Inspect before SQLite opens: even mode=ro can create WAL sidecars.
+        # This viewer accepts stable rollback-journal exports, never converts them.
+        try:
+            with db.open('rb') as handle:
+                header = handle.read(20)
+            if header[:16] == b'SQLite format 3\x00' and (header[18] == 2 or header[19] == 2):
+                raise WatchlistError('SAMPLE_UNAVAILABLE', 503,
+                                     '暂不支持 WAL 快照，请提供稳定的非 WAL 导出。')
+        except OSError:
+            raise WatchlistError('SAMPLE_UNAVAILABLE', 503, '真实快照数据库不可读。') from None
 
     def _open_snapshot(self):
         sample = self._sample_config()
@@ -217,7 +232,8 @@ class RealWatchlistService:
         digest = hashlib.sha256()
         digest.update(json.dumps({'codes': [item['code'] for item in sample['symbols']],
                                   'output': sample['output_dir']}, sort_keys=True).encode('utf-8'))
-        names = ['bars.db', 'verification.json', 'strategy_readiness.json']
+        names = ['bars.db', 'bars.db-wal', 'bars.db-shm', 'bars.db-journal',
+                 'verification.json', 'strategy_readiness.json']
         names += [item['code'] + '_' + suffix for item in sample['symbols']
                   for suffix in ('stock_basic.csv', 'finance_asof.csv', 'suspend_d.csv')]
         try:
@@ -227,7 +243,7 @@ class RealWatchlistService:
                     stat = path.stat()
                 except OSError:
                     continue
-                digest.update(f'{name}|{stat.st_size}|{stat.st_mtime_ns}'.encode('utf-8'))
+                digest.update(f'{name}|{stat.st_size}|{stat.st_mtime_ns}|{stat.st_ctime_ns}|{stat.st_ino}'.encode('utf-8'))
         except WatchlistError:
             return None
         return digest.hexdigest()[:16]
@@ -294,6 +310,36 @@ class RealWatchlistService:
                 'missingDateCount': len(missing),
                 'note': '采集校验通过。' if passed else '该股票采集校验未通过，数据仅供排查。'}
 
+    @staticmethod
+    def _coverage(connection, code, adjust):
+        row = connection.execute(
+            'SELECT COUNT(*) AS count, MAX(date) AS latest FROM daily_bar WHERE code=? AND adjust=?',
+            (code, adjust)).fetchone()
+        return int(row['count']), _iso_day(str(row['latest'])) if row['latest'] else None
+
+    @staticmethod
+    def _validate_coverage(item, count, latest, count_key, required=False):
+        if not isinstance(item, dict):
+            return False
+        recorded_count = item.get(count_key)
+        recorded_latest = _iso_day(item.get('latest_date'))
+        complete = (isinstance(recorded_count, int) and not isinstance(recorded_count, bool)
+                    and recorded_latest is not None)
+        if (complete and (recorded_count != count or recorded_latest != latest)) or (required and not complete):
+            raise WatchlistError('SNAPSHOT_CHANGED', 409, '校验报告与行情覆盖不一致，请重新生成稳定快照。')
+        return complete
+
+    def _verified_coverage(self, connection, verification, code):
+        symbols = verification.get('symbols')
+        item = symbols.get(code) if isinstance(symbols, dict) else None
+        coverage = {}
+        for adjust in ADJUST_LABELS:
+            count, latest = self._coverage(connection, code, adjust)
+            self._validate_coverage(item, count, latest, 'rows',
+                                    required=isinstance(item, dict) and item.get('status') == 'passed')
+            coverage[adjust] = (count, latest)
+        return coverage
+
     def _main_mode(self):
         labels = self.config['labels']
         mode = {'mode': 'unknown', 'label': labels['mainUnknown'],
@@ -320,6 +366,7 @@ class RealWatchlistService:
             return mode
 
     def _rows(self, out, db, sample, verification):
+        self._require_stable_journal(db)
         connection = self._connect(db)
         stocks = []
         finance_total = 0
@@ -332,6 +379,7 @@ class RealWatchlistService:
                 f'SELECT COUNT(*) FROM daily_bar WHERE code IN ({placeholders})', codes).fetchone()[0]
             for item in sample['symbols']:
                 code = item['code']
+                self._verified_coverage(connection, verification, code)
                 basic = self._stock_basic(out, code)
                 finance_rows, finance_count = self._finance(out, code)
                 finance_total += finance_count
@@ -373,13 +421,13 @@ class RealWatchlistService:
                         'financeRows': finance_total, 'latestDate': latest}
 
     def _as_of(self, verification, scope):
-        value = _iso_day(verification.get('as_of')) if isinstance(verification.get('as_of'), str) else None
-        return value or (scope or {}).get('latestDate')
+        return (scope or {}).get('latestDate')
 
     def _source(self, verification, scope, main):
         labels = self.config['labels']
         as_of = self._as_of(verification, scope)
         return {'kind': 'real_sample', 'label': labels['watchlist'], 'asOf': as_of,
+                'queryCutoff': _iso_day(verification.get('as_of')),
                 'mainMode': main['mode'],
                 'note': f'{labels["history"]}；{main["label"]}；{labels["notAccepted"]}。'}
 
@@ -441,9 +489,11 @@ class RealWatchlistService:
             raise WatchlistError('SNAPSHOT_CHANGED', 409, '快照已更新，请重新加载。')
         main = self._main_mode()
 
+        self._require_stable_journal(db)
         connection = self._connect(db)
         try:
             self._require_table(connection)
+            coverage = self._verified_coverage(connection, verification, code)
             total = connection.execute(
                 'SELECT COUNT(*) FROM daily_bar WHERE code=? AND adjust=?',
                 (code, adjust)).fetchone()[0]
@@ -474,7 +524,11 @@ class RealWatchlistService:
         technical_item = symbols.get(code) if isinstance(symbols.get(code), dict) else {}
         raw_factors = technical_item.get('technical_factors') if isinstance(technical_item.get('technical_factors'), dict) else {}
         factors = {key: _finite(raw_factors.get(key)) for key in TECHNICAL}
-        available = bool(raw_factors)
+        qfq_count, qfq_latest = coverage['qfq']
+        readiness_matches = self._validate_coverage(technical_item, qfq_count, qfq_latest, 'history_count') if raw_factors and check['passed'] else False
+        available = bool(raw_factors) and check['passed'] and readiness_matches
+        if not available:
+            factors = {key: None for key in TECHNICAL}
         blockers = readiness.get('blockers') if isinstance(readiness.get('blockers'), list) else []
         blockers = [value for value in blockers if value in STRATEGY_BLOCKERS]
         history_count = len(bars) if not (rows and total) else total
@@ -499,7 +553,7 @@ class RealWatchlistService:
             'units': {'price': '元', 'volume': '股', 'amount': '元'},
             'finance': {'available': bool(finance_rows), 'rows': finance_rows, 'rowCount': finance_count,
                         'note': '供应商原始财务指标；年/累计口径，不是单季指标，未经验证。'},
-            'technical': {'available': available, 'status': technical_item.get('status') if isinstance(technical_item.get('status'), str) else 'unavailable',
+            'technical': {'available': available, 'status': technical_item.get('status') if available and isinstance(technical_item.get('status'), str) else 'unavailable',
                           'factors': factors, 'fields': self.config['technical'],
                           'blockers': blockers, 'strategyAcceptance': False,
                           'note': '仅复用已生成的样本技术指标；完整策略、评分、胜率与排名尚未验收。'},
