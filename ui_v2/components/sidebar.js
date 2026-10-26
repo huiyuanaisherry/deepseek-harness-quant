@@ -111,12 +111,31 @@
         var dd = d.data_date || (d.brief && d.brief.date) || tm.date || '';
         var f = document.getElementById(elId + '-foot');
         if (!f) return;
-        var sc = tm.score != null ? tm.score : '…';
+        // ★2026-10-26 Task 2：只有加载了 portal_status.js 的页面才启用模块状态判断，
+        // 其余页面（sidebar 全站共用）保持原有数值渲染，避免把正常数值降级为“状态未知”。
+        var ps = window.LW && window.LW.portalStatus;
+        if (ps) {
+          var view = ps.moduleView(d.modules, 'timing');
+          if (!view || view.known !== true) {
+            f.innerHTML = '<span class="sb-mini">数据日 ' + (dd || '—') + '</span>' +
+              '<span class="sb-mini">状态未知：接口未提供模块状态</span>';
+            return;
+          }
+          if (view.showValue !== true) {
+            f.innerHTML = '<span class="sb-mini">数据日 ' + (dd || '—') + '</span>' +
+              '<span class="sb-mini" title="' + ps.reasonText(view.reason) + '">择时 ' + view.label + '</span>';
+            return;
+          }
+        }
+        var sc = tm.score != null ? tm.score : '—';
         var lv = tm.level || '';
         f.innerHTML =
           '<span class="sb-mini">数据日 ' + dd + '</span>' +
           '<span class="sb-mini">择时 ' + sc + (lv ? ' · ' + lv : '') + '</span>';
-      }).catch(function () {});
+      }).catch(function () {
+        var f = document.getElementById(elId + '-foot');
+        if (f) f.innerHTML = '<span class="sb-mini">状态未知 · 接口不可达</span>';
+      });
     }
   };
 })();

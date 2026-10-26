@@ -14,6 +14,7 @@
 7. [真实观察池实现审查及修复验收](reviews/2026-10-26-real-watchlist-review.md)：六项问题已修复并部署Windows，当前功能提交8198b06；服务器与HTTP验收通过，最终完整浏览器复测受网络/浏览器连接故障影响。此记录覆盖上文未部署和“待恢复SSH”的旧判断。
 
 8. [交给 Trae 的首页真实数据接入方案](superpowers/plans/2026-10-26-portal-real-data-for-trae.md)：待实施；按状态治理、独立数据与计算、生产切换和调度分阶段验收。禁止把六股观察池完成等同首页选股链可用。
+9. [门户数据依赖审查](reviews/2026-10-26-portal-data-dependency-review.md)（Task 1）与 [模块可用性契约交付](reviews/2026-10-26-portal-status-contract.md)（Task 2）：首页各模块的依赖、六态契约、测试命令与结果、当前阻塞；未切换数据源、未启用调度。
 
 ## 长期规则
 

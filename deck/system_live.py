@@ -14,9 +14,16 @@ import socket
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent.parent
+
+# deck 既可作为包（deck.system_live）也可作为顶层模块（deck_server 直接 import system_live）加载
+try:
+    from . import portal_status as _ps
+except ImportError:
+    import portal_status as _ps
 
 DBS = {
     "bars": r"data/cache/bars.db",
@@ -118,11 +125,25 @@ def _scheduled() -> dict:
     return out
 
 
+_health_cache = {"ts": 0.0, "data": None}
+
+
 def _api_health() -> dict:
     """对 Deck 自身各 API 端点做存活探测（本进程直接读文件更快）
-    ★#351 每数据源自定义滞后阈值 stale_h（低频源如 beneish/sim_tracks 用大阈值，
-    高频源用 24-48h）——前端按 stale_h 判断"滞后"，不再一刀切 24h 误报低频源"""
+
+    ★2026-10-26 Task 2：区分"接口可达（online）"与"数据可用（state）"：
+      - missing：文件未生成；
+      - empty：文件为空；
+      - error：JSON 损坏/不可读；
+      - stale：能解析但业务数据日或 mtime 超阈值；
+      - ready：可用。
+    可用性优先按产物内的业务数据日判断（touch 文件不能恢复新鲜）；
+    保留原 online/age_h/stale_h/stale 字段兼容旧页面。
+    """
     import glob
+    now = time.time()
+    if _health_cache["data"] is not None and now - _health_cache["ts"] < 60:
+        return _health_cache["data"]
     checks = {
         "pitch_v2": ("logs/pitch_v2_*.json", 48),
         "opp_pool": ("logs/opp_pool_*.json", 48),
@@ -141,17 +162,45 @@ def _api_health() -> dict:
         full = str(BASE / pat)
         if "*" in pat:
             files = sorted(glob.glob(full))
-            ok = bool(files)
-            age = time.time() - Path(files[-1]).stat().st_mtime if ok else None
         else:
-            p = Path(full)
-            ok = p.exists()
-            age = time.time() - p.stat().st_mtime if ok else None
-        out[name] = {"online": ok,
-                     "age_h": round(age / 3600, 1) if age is not None else None,
-                     "stale_h": stale_h,
-                     "stale": (not ok) or (age is not None and age > stale_h * 3600)}
+            files = [full] if Path(full).exists() else []
+        if not files:
+            out[name] = {"online": False, "age_h": None, "stale_h": stale_h,
+                         "stale": True, "state": "missing",
+                         "reason": "source_missing", "data_date": None}
+            continue
+        latest = Path(files[-1])
+        try:
+            age = now - latest.stat().st_mtime
+        except OSError:
+            age = None
+        age_h = round(age / 3600, 1) if age is not None else None
+        data_date = None
+        state, reason = "ready", None
+        try:
+            raw = latest.read_text(encoding="utf-8")
+            if not raw.strip():
+                state, reason = "empty", "source_empty"
+            else:
+                payload = json.loads(raw)
+                data_date = _ps.extract_data_date(payload)
+                if data_date:
+                    day_age = (datetime.now().date()
+                               - datetime.strptime(data_date, "%Y-%m-%d").date()).days
+                    if day_age * 24 > stale_h:
+                        state, reason = "stale", "source_stale"
+                elif age is not None and age > stale_h * 3600:
+                    state, reason = "stale", "source_stale"
+        except (ValueError, UnicodeError):
+            state, reason = "error", "source_corrupt_json"
+        except OSError:
+            state, reason = "error", "source_unreadable"
+        out[name] = {"online": True, "age_h": age_h, "stale_h": stale_h,
+                     "stale": state != "ready", "state": state,
+                     "reason": reason, "data_date": data_date}
+    _health_cache.update({"ts": now, "data": out})
     return out
+
 
 
 def _deck_pid() -> int:
@@ -187,43 +236,76 @@ def _activity_feed(minutes: int = 60) -> list:
     return items[:15]
 
 
-def _next_schedule() -> list:
-    """★2026-08-10 距下次各计划任务倒计时（分钟）
-    ★2026-08-14 修复：schtasks 输出"下次运行时间"为本地化格式（如 2026/8/14 10:00:00，
-    月份/日期不补零），strptime 在部分环境解析失败或类型异常导致 portal_dash 间歇 500。
-    改为容错解析：手写拆分（年/月/日/时/分/秒）→ datetime；任何失败返回 None 不抛错。"""
+_next_sched_cache = {"ts": 0.0, "data": None}
+
+
+def _next_schedule_detail() -> dict:
+    """计划任务查询明细：{items, state, reason}。
+
+    ★2026-10-26 Task 2：把"查询不可用"与"没有任务"分开表达——
+    非 Windows 环境无 schtasks → blocked/scheduler_unsupported；
+    全部查询失败 → error/query_failed；查询成功但无任务 → empty/no_tasks；
+    部分失败 → stale/partial_query_failed。
+    旧 `_next_schedule()` 仍返回 items 列表以兼容既有调用方。
+    """
+    now = time.time()
+    if _next_sched_cache["data"] is not None and now - _next_sched_cache["ts"] < 300:
+        return _next_sched_cache["data"]
+    if not sys.platform.startswith("win"):
+        detail = {"items": [], "state": "blocked",
+                  "reason": "scheduler_unsupported", "platform": sys.platform}
+        _next_sched_cache.update({"ts": now, "data": detail})
+        return detail
     out = []
-    try:
-        import re as _re
-        from datetime import datetime as _dt
-        for name, desc in SCHEDULED_TASKS:
-            try:
-                r = subprocess.run(["schtasks", "/Query", "/TN", name, "/FO", "LIST", "/V"],
-                                   capture_output=True, text=True, errors="replace",
-                                   encoding="gbk", timeout=8)
-                m = _re.search(r"下次运行时间:\s*(.+)", r.stdout)
-                if not m:
-                    continue
-                nxt = m.group(1).strip()
-                # ★容错解析：拆分数字（兼容 2026/8/14 10:00:00 和 2026-08-14 10:00:00）
-                parts = _re.findall(r"\d+", nxt)
-                if len(parts) >= 5:
-                    y, mo, d, h, mi = (int(parts[0]), int(parts[1]), int(parts[2]),
-                                       int(parts[3]), int(parts[4]))
-                    s = int(parts[5]) if len(parts) >= 6 else 0
-                    try:
-                        nxt_dt = _dt(y, mo, d, h, mi, s)
-                        mins = round((nxt_dt - _dt.now()).total_seconds() / 60, 0)
-                        out.append({"name": name, "desc": desc, "next": nxt,
-                                    "mins_left": int(mins)})
-                    except Exception:
-                        out.append({"name": name, "desc": desc, "next": nxt,
-                                    "mins_left": None})
-            except Exception:
+    errors = 0
+    for name, desc in SCHEDULED_TASKS:
+        try:
+            r = subprocess.run(["schtasks", "/Query", "/TN", name, "/FO", "LIST", "/V"],
+                               capture_output=True, text=True, errors="replace",
+                               encoding="gbk", timeout=8)
+            m = re.search(r"下次运行时间:\s*(.+)", r.stdout)
+            if not m:
+                errors += 1
                 continue
-    except Exception:
-        pass
-    return out
+            nxt = m.group(1).strip()
+            # ★容错解析：拆分数字（兼容 2026/8/14 10:00:00 和 2026-08-14 10:00:00）
+            parts = re.findall(r"\d+", nxt)
+            if len(parts) >= 5:
+                y, mo, d, h, mi = (int(parts[0]), int(parts[1]), int(parts[2]),
+                                   int(parts[3]), int(parts[4]))
+                s = int(parts[5]) if len(parts) >= 6 else 0
+                try:
+                    nxt_dt = datetime(y, mo, d, h, mi, s)
+                    mins = round((nxt_dt - datetime.now()).total_seconds() / 60, 0)
+                    out.append({"name": name, "desc": desc, "next": nxt,
+                                "mins_left": int(mins)})
+                except Exception:
+                    out.append({"name": name, "desc": desc, "next": nxt,
+                                "mins_left": None})
+            else:
+                out.append({"name": name, "desc": desc, "next": nxt,
+                            "mins_left": None})
+        except Exception:
+            errors += 1
+            continue
+    if out and not errors:
+        state, reason = "ready", None
+    elif out:
+        state, reason = "stale", "partial_query_failed"
+    elif errors:
+        state, reason = "error", "query_failed"
+    else:
+        state, reason = "empty", "no_tasks"
+    detail = {"items": out, "state": state, "reason": reason,
+              "platform": sys.platform}
+    _next_sched_cache.update({"ts": now, "data": detail})
+    return detail
+
+
+def _next_schedule() -> list:
+    """★2026-08-10 距下次各计划任务倒计时（分钟）；兼容旧调用方，仅返回 items。"""
+    return _next_schedule_detail().get("items") or []
+
 
 
 _cache = {"ts": 0.0, "data": None}

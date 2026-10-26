@@ -26,12 +26,12 @@
         var s = document.getElementById('sb-date'), c = document.getElementById('sb-chain'), t = document.getElementById('sb-timing');
         if (!s) return;
         var day = d && (d.data_date || d.date || d.ts);
-        // ★2026-08-14 数据即时性：数据日带语义（data_semantic：盘中/盘后/周末），
-        //   title 悬浮说明"日线每日 18:30 更新"，解决"看到 13 号以为是卡住"
+        // ★2026-08-14 数据即时性：数据日带语义（data_semantic：盘中/盘后/周末）
+        // ★2026-10-26 Task 2：删除无调度证据的“每日 18:30 自动更新”承诺
         if (day) {
           var sem = d.data_semantic || ('数据日 ' + String(day).slice(0, 10));
           s.textContent = '数据日 ' + String(day).slice(0, 10);
-          s.title = sem + '（日线每日 18:30 收盘后更新）';
+          s.title = sem + '（按业务数据日判断；未配置调度时不会自动更新）';
           s.style.color = sem.indexOf('已更新') >= 0 ? '#4ade80' : (sem.indexOf('盘') >= 0 ? '#93c5fd' : '#f2c94c');
         }
         var chain = d && d.chain;
@@ -44,7 +44,12 @@
         //   （顶栏"择时"恒空）。且 statusbar 不渲染 emoji（UI 标准 v1：全站不用 emoji）。
         var tm = d && d.timing && d.timing.timing;
         if (tm) t.textContent = '择时 ' + win.LW.render._f(tm.level, '') + ' ' + win.LW.render._f(tm.score, '') + '分';
-      }).catch(function () { /* 降级：保持占位文案 */ });
+      }).catch(function () {
+        // ★2026-10-26 Task 2：接口失败不能一直停留在“…”占位，明确显示状态未知
+        var c2 = document.getElementById('sb-chain'), t2 = document.getElementById('sb-timing');
+        if (c2) c2.textContent = '决策链 状态未知';
+        if (t2) t2.textContent = '择时 状态未知';
+      });
     }
   }
 

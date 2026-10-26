@@ -19,6 +19,12 @@ BASE = Path(__file__).resolve().parent.parent
 if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))
 
+# deck 既可作为包（deck.live_api）也可作为顶层模块（deck_server 直接 import live_api）加载
+try:
+    from . import portal_status as _ps
+except ImportError:
+    import portal_status as _ps
+
 _fwd_cache = {"ts": 0, "data": None}
 _cal_cache = {"ts": 0, "data": None}   # ★#150 日历缓存（数据源版本 5min）
 _alrt_cache = {"ts": 0, "data": None}  # ★#150 预警缓存（数据源版本 2min）
@@ -598,15 +604,31 @@ def live_tech() -> dict:
 
 
 def live_pools() -> dict:
-    """各池状态汇总（待处理面板数据源）"""
+    """各池状态汇总（待处理面板数据源）
+
+    ★2026-10-26 Task 2：源文件未生成或结构不匹配时计数返回 None（不再伪装成 0）；
+    各模块可用性以 /api/live/portal_dash 的 modules 映射为准。
+    """
     pool = _read("opp_pool_*.json")
     pitch = _read("pitch_v2_*.json")
     tech = _read("tech_pitch_*.json")
     stop = _read("stop_alerts_*.json")
     track = _read("pitch_track_pool_*.json")
+    has = {name: _latest_file(pat) is not None for name, pat in (
+        ("opp_pool", "opp_pool_*.json"), ("pitch", "pitch_v2_*.json"),
+        ("tech_pitch", "tech_pitch_*.json"), ("stop_alerts", "stop_alerts_*.json"),
+        ("forward_track", "pitch_track_pool_*.json"))}
+
+    def _len_of(payload, keys):
+        if not payload:
+            return None
+        value = next((payload[k] for k in keys
+                      if isinstance(payload.get(k), (list, dict))), None)
+        return len(value) if value is not None else None
+
     # ★#347 持仓止损预警：只统计真实持仓（holding）的临近/触发——远期池全量监测（monitored 86 只）
     #   不是"我的持仓预警"，门户 KPI 应显示持仓维度（机器池/自动池自动止损止盈不在此提醒，#340 精神）
-    held_trig = held_near = held_n = 0
+    held_trig = held_near = held_n = None
     try:
         # ★2026-08-14 口径修复：只算真实持仓（holding），排除 over_limit（超 5 只纪律拒绝非持仓）
         #   （原 positions() 含 over_limit → 门户 KPI"持仓 6"与实际 5 不符）
@@ -614,6 +636,7 @@ def live_pools() -> dict:
         _pos_codes = {p["code"] for p in _pl().get("positions", [])
                       if p.get("status") == "holding"}
         held_n = len(_pos_codes)
+        held_trig = held_near = 0
         for _e in (stop.get("entries") or []):
             if _e.get("code") in _pos_codes:
                 if _e.get("status") == "TRIGGERED":
@@ -621,7 +644,7 @@ def live_pools() -> dict:
                 elif _e.get("status") == "NEAR":
                     held_near += 1
     except Exception:
-        pass
+        held_trig = held_near = held_n = None
     # ★#348 类型分布（top 3 类型 + 数量）——前端动态显示，不写死"价值/重估/质量"这类文字
     def _otype_dist(items, key="otype"):
         from collections import Counter
@@ -634,16 +657,27 @@ def live_pools() -> dict:
     return {
         "ok": True,
         "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "opp_pool": {"n": len(pool.get("opportunities", [])), "date": pool.get("date", "")},
-        "pitch": {"n": len(pitch.get("pitch", [])), "date": pitch.get("date", ""),
-                  "types": _otype_dist(pitch.get("pitch", []))},
-        "tech_pitch": {"n": len(tech.get("entries", [])), "new": len(tech.get("new_codes", [])),
+        "opp_pool": {"n": _len_of(pool, ("opportunities", "items", "opps"))
+                     if has["opp_pool"] else None,
+                     "date": pool.get("date", "")},
+        "pitch": {"n": _len_of(pitch, ("pitch", "items")) if has["pitch"] else None,
+                  "date": pitch.get("date", ""),
+                  "types": _otype_dist(pitch.get("pitch", [])) if has["pitch"] else []},
+        "tech_pitch": {"n": _len_of(tech, ("entries", "pitch", "tech"))
+                       if has["tech_pitch"] else None,
+                       "new": len(tech.get("new_codes", [])) if has["tech_pitch"] else None,
                        "date": tech.get("pool_date", ""),
-                       "types": _otype_dist(tech.get("entries", []), key="otype")},
-        "stop_alerts": {"triggered": stop.get("triggered", 0), "near": stop.get("near", 0),
-                        "monitored": stop.get("monitored", 0), "ts": stop.get("ts", ""),
-                        "held_triggered": held_trig, "held_near": held_near, "held_n": held_n},
-        "forward_track": {"n": len(track.get("entries", [])), "ts": track.get("ts", "")},
+                       "types": _otype_dist(tech.get("entries", []), key="otype")
+                       if has["tech_pitch"] else []},
+        "stop_alerts": ({"triggered": stop.get("triggered"), "near": stop.get("near"),
+                         "monitored": stop.get("monitored"), "ts": stop.get("ts", ""),
+                         "held_triggered": held_trig, "held_near": held_near,
+                         "held_n": held_n}
+                        if has["stop_alerts"] else
+                        {"triggered": None, "near": None, "monitored": None, "ts": "",
+                         "held_triggered": None, "held_near": None, "held_n": None}),
+        "forward_track": {"n": _len_of(track, ("entries",)) if has["forward_track"] else None,
+                          "ts": track.get("ts", "")},
     }
 
 
@@ -2852,6 +2886,106 @@ def live_factor_dash() -> dict:
 # ══════════════════════════════════════════════════════════════════
 _pd_cache = {"ts": 0, "data": None}
 
+# ★2026-10-26 Task 2：首页模块 → 真实产物映射（只读，不生成数据）
+_PORTAL_SPECS = (
+    ("opp_pool", "logs", "opp_pool_*.json", ("opportunities", "items", "opps"), 4),
+    ("pitch", "logs", "pitch_v2_*.json", ("pitch", "items"), 4),
+    ("tech_pitch", "logs", "tech_pitch_*.json", ("entries", "pitch", "tech"), 4),
+    ("stop_alerts", "logs", "stop_alerts_*.json", ("entries", "alerts"), 4),
+    ("forward_track", "logs", "pitch_track_pool_*.json", ("entries",), 4),
+    ("timing", "output", "timing_system_*.json", (), 4),
+    ("traffic_light", "output", "traffic_light.json", (), 8),
+    ("global_rotation", "output", "global_rotation.json", ("assets",), 8),
+)
+
+
+def _module_state(key, state, mode, data_date=None, generated_at=None, reason=None):
+    return _ps.build_module_status(state=state, mode=mode, data_date=data_date,
+                                   generated_at=generated_at, scope=key,
+                                   reason=reason, run_id=None)
+
+
+def _brief_module(mode, brief):
+    if not isinstance(brief, dict) or not brief:
+        return _module_state("brief", "missing", mode, reason="artifact_missing")
+    if brief.get("ok") is False:
+        return _module_state("brief", "error", mode, reason="compute_failed")
+    data_date, generated_at = brief.get("date"), brief.get("ts")
+    if not (brief.get("items") or []):
+        return _module_state("brief", "empty", mode, data_date, generated_at, "no_items")
+    return _module_state("brief", "ready", mode, data_date, generated_at)
+
+
+def _chain_module(mode, chain):
+    if not isinstance(chain, dict) or not chain:
+        return _module_state("chain", "missing", mode, reason="artifact_missing")
+    if chain.get("ok") is False:
+        return _module_state("chain", "error", mode, reason="compute_failed")
+    nodes = chain.get("chain") or []
+    data_date, generated_at = chain.get("latest_td"), chain.get("ts")
+    if not nodes:
+        return _module_state("chain", "empty", mode, data_date, generated_at, "no_items")
+    lag = [n for n in nodes if not n.get("ok")]
+    return _module_state("chain", "stale" if lag else "ready", mode,
+                         data_date, generated_at, "chain_lag" if lag else None)
+
+
+def _health_module(mode, health):
+    if not isinstance(health, dict) or not health:
+        return _module_state("api_health", "missing", mode, reason="artifact_missing")
+    rows = [v for v in health.values() if isinstance(v, dict)]
+    states = [v.get("state") for v in rows if v.get("state")]
+    if not states:
+        return _module_state("api_health", "error", mode,
+                             reason="artifact_schema_mismatch")
+    dates = [v.get("data_date") for v in rows if v.get("data_date")]
+    data_date = max(dates) if dates else None
+    for state, reason in (("error", "source_corrupt_json"),
+                          ("missing", "source_missing"),
+                          ("blocked", "source_blocked"),
+                          ("stale", "source_stale"),
+                          ("empty", "source_empty")):
+        if state in states:
+            return _module_state("api_health", state, mode, data_date, None, reason)
+    return _module_state("api_health", "ready", mode, data_date)
+
+
+def _schedule_module(mode, detail):
+    if not isinstance(detail, dict):
+        return _module_state("schedule", "missing", mode, reason="artifact_missing")
+    state = detail.get("state") if detail.get("state") in _ps.STATES else "error"
+    return _module_state("schedule", state, mode, reason=detail.get("reason"))
+
+
+def _portal_modules(mode: str, dash=None, root=None) -> dict:
+    """首页 12 个模块的可用性映射（只读文件 + 已聚合子结果）。
+
+    dash 为已生成的门户子结果；未提供时对应派生模块按 missing 处理，不假装成功。
+    """
+    base = Path(root) if root is not None else BASE
+    dash = dash or {}
+    modules = {}
+    for key, sub, pattern, item_keys, stale_days in _PORTAL_SPECS:
+        try:
+            res = _ps.assess_latest(base / sub, pattern, mode=mode,
+                                    item_keys=item_keys, scope=key,
+                                    stale_days=stale_days)
+            status = res["status"]
+            if key == "traffic_light" and status["state"] == "ready" \
+                    and not (res.get("payload") or {}).get("state"):
+                status = _module_state(key, "error", mode, status.get("data_date"),
+                                       status.get("generated_at"),
+                                       "artifact_schema_mismatch")
+        except Exception:
+            status = _module_state(key, "error", mode, reason="status_probe_failed")
+        modules[key] = status
+    modules["brief"] = _brief_module(mode, dash.get("brief"))
+    modules["chain"] = _chain_module(mode, dash.get("chain"))
+    modules["api_health"] = _health_module(mode, dash.get("api_health"))
+    modules["schedule"] = _schedule_module(mode, dash.get("schedule"))
+    return modules
+
+
 
 def live_portal_dash() -> dict:
     """门户单 API 聚合（★#308 缓存 30s→300s：门户数据 18:30 数据链才更新，非实时；30s 太短导致频繁重算）：
@@ -2871,11 +3005,11 @@ def live_portal_dash() -> dict:
     try:
         out["chain"] = live_chain()
     except Exception:
-        pass
+        out["chain"] = {"ok": False, "error": "compute_failed", "chain": []}
     try:
         out["brief"] = live_brief()
     except Exception:
-        pass
+        out["brief"] = {"ok": False, "error": "compute_failed", "items": []}
     try:
         # ★2026-08-14 跨资产轮动防守信号（a_share_weak + global_rotation，因子池 P0 落地）
         _gr = BASE / "output" / "global_rotation.json"
@@ -2911,36 +3045,39 @@ def live_portal_dash() -> dict:
             _is_td = (_td_ts.date() == _dnow.date())
             if _is_td:
                 if _hm < 930:
-                    _sem = "盘前 · 今日数据待 18:30 收盘后更新"
+                    _sem = "盘前 · 今日数据待收盘后更新"
                 elif _hm < 1500:
-                    _sem = "盘中 · 实时数据为上一交易日（今日 18:30 收盘后更新）"
+                    _sem = "盘中 · 实时数据为上一交易日（今日收盘后更新）"
                 elif _hm < 1830:
-                    _sem = "已收盘 · 数据 18:30 管道更新中"
+                    _sem = "已收盘 · 今日数据管道更新中"
                 else:
                     _sem = "今日数据已更新"
             else:
                 _days = (_dnow.date() - _td_ts.date()).days
                 if _wk >= 5:
-                    _sem = f"周末 · 最新完整交易日 {_td}（周一 18:30 更新）"
+                    _sem = f"周末 · 最新完整交易日 {_td}"
                 elif _days >= 1:
-                    _sem = f"最新完整交易日 {_td} · 今日数据 18:30 收盘后更新"
+                    _sem = f"最新完整交易日 {_td} · 今日数据待更新"
                 else:
                     _sem = f"最新完整交易日 {_td}"
             out["data_semantic"] = _sem
     except Exception:
         pass
     try:
-        # ★2026-08-14 数据即时性优化：下次计划运行（门户运行状态窗口数据源）
-        from deck.system_live import _next_schedule
-        out["next_schedule"] = _next_schedule()
+        # ★2026-10-26 Task 2：计划任务查询可达性单独表达（不支持/查询失败/无任务 ≠ 运行正常）
+        from deck.system_live import _next_schedule_detail
+        _sched = _next_schedule_detail()
+        out["schedule"] = _sched
+        out["next_schedule"] = _sched.get("items") or []
     except Exception:
-        pass
+        out["schedule"] = {"items": [], "state": "error", "reason": "query_failed"}
+        out["next_schedule"] = []
     try:
         # ★#347 API/数据源健康（各关键数据文件新鲜度——门户"当前 API 状态"）
         from deck.system_live import _api_health
         out["api_health"] = _api_health()
     except Exception:
-        pass
+        out["api_health"] = {"_error": "compute_failed"}
     try:
         # ★#289 KPI 历史序列（sparkline 数据源）：从历史文件聚合最近 12 个时点的
         #   机会池 n / Pitch长 n / Pitch短 n（按文件名 mtime 排序取最新 12 个）
@@ -2965,6 +3102,12 @@ def live_portal_dash() -> dict:
             out["kpi_series"][_k] = _ser[-12:]
     except Exception:
         pass
+    try:
+        # ★2026-10-26 Task 2：各模块可用性（六态 + 模式 + 数据日 + 原因码），保留上方旧字段兼容
+        out["data_mode"] = _ps.resolve_mode(BASE)
+        out["modules"] = _portal_modules(out["data_mode"], out)
+    except Exception:
+        out["modules"] = {}
     _pd_cache.update({"ts": _now, "data": out})
     return out
 
@@ -3279,9 +3422,14 @@ def live_endpoints(cookie: str = "", port: int = 8787) -> dict:
 
 def live_wufu_rotation() -> dict:
     """★2026-08-16 五福轮动门户摆件：9 只全球 ETF 代理池常态动量面板（常显，不依赖弱市）
-    + 弱市防守建议（读 global_rotation.json 合并）。"""
+    + 弱市防守建议（读 global_rotation.json 合并）。
+
+    ★2026-10-26 Task 2：新增 module 状态（缺失引擎/缺输入/计算失败/陈旧/空/正常），
+    不可计算时 ok=False 并给出原因码，前端不再把空列表当成"0 个轮动"。
+    """
     out = {"ok": True, "date": "", "assets": [], "a_share_weak": None, "weak_vote": None,
-           "defensive": None}
+           "defensive": None, "module": None}
+    _state, _reason = "ready", None
     try:
         import sys as _sys
         from pathlib import Path as _P
@@ -3291,8 +3439,24 @@ def live_wufu_rotation() -> dict:
         from factors.policy.global_rotation import widget
         w = widget()
         out.update({"date": w["date"], "assets": w["assets"]})
+        if not out["assets"]:
+            _state, _reason = "empty", "no_items"
+        elif out.get("date"):
+            try:
+                _age = (datetime.now().date()
+                        - datetime.strptime(str(out["date"])[:10], "%Y-%m-%d").date()).days
+                if _age > 8:
+                    _state, _reason = "stale", "artifact_stale"
+            except Exception:
+                pass
+    except ImportError:
+        _state, _reason = "blocked", "engine_unavailable"
+    except FileNotFoundError:
+        _state, _reason = "blocked", "input_missing"
     except Exception as _e:
         out["error"] = str(_e)[:200]
+        _state = "blocked" if isinstance(_e, (KeyError, ValueError)) else "error"
+        _reason = "input_invalid" if _state == "blocked" else "compute_failed"
     # 弱市防守建议（global_rotation.json）
     try:
         _gr = _BASE / "output" / "global_rotation.json"
@@ -3305,6 +3469,10 @@ def live_wufu_rotation() -> dict:
             out["date"] = g.get("date") or out["date"]
     except Exception:
         pass
+    if _state in ("blocked", "error", "missing"):
+        out["ok"] = False
+    out["module"] = _module_state("global_rotation", _state, "unknown",
+                                  out.get("date"), None, _reason)
     return out
 
 
