@@ -11,6 +11,8 @@
 5. [小样本实施计划](superpowers/plans/2026-10-25-real-data-sample.md)：实现任务及复现入口。
 6. [交给 Trae 的真实观察池方案](superpowers/plans/2026-10-25-real-watchlist-for-trae.md)：只读 `/real-watchlist` 页面与三个来源接口已实现（提交 `8edfe1d`），本地合成数据 Chrome 验收通过；Windows 尚未部署，真实六只页面验收待恢复 SSH 后进行。
 
+7. [真实观察池实现审查](reviews/2026-10-26-real-watchlist-review.md)：六项正确性问题待修复；Windows SSH 用户1可正常连接，观察池尚未部署。此记录更正上文“待恢复SSH”的判断。
+
 ## 长期规则
 
 - 用户部署目标为 Windows / WSL；网页使用 Windows 可达地址访问，本机回环地址不能代表另一台主机。
