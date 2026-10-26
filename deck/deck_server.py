@@ -23,6 +23,7 @@ API：
   GET  /api/sim         → logs/sim_tracks.json         模拟盘双轨
 """
 import json
+import gzip
 import re
 
 # ★2026-08-13 黑框隐藏（总指挥要求：计划任务/常驻进程不弹黑框，运行完自动关闭不留窗）
@@ -189,12 +190,14 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
     # ★2026-08-10 个股检测缓存（类变量：跨请求共享；每请求实例会重置实例属性）
     _sc_cache = {}
 
-    def _send(self, code: int, body: bytes, ctype: str = "application/json"):
+    def _send(self, code: int, body: bytes, ctype: str = "application/json", extra_headers=None):
         try:
             self.send_response(code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            for name, value in (extra_headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, TimeoutError):
@@ -208,6 +211,30 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
         except Exception:
             pass
         self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"))
+
+    def _send_watchlist_detail(self, obj):
+        """Negotiate gzip only for the larger, private watchlist detail DTO."""
+        body = json.dumps(_json_safe(obj), ensure_ascii=False).encode('utf-8')
+        headers = {'Vary': 'Accept-Encoding'}
+        accepts_gzip = False
+        for entry in self.headers.get('Accept-Encoding', '').split(','):
+            parts = [part.strip().lower() for part in entry.split(';')]
+            if parts[0] != 'gzip':
+                continue
+            quality = 1.0
+            for parameter in parts[1:]:
+                key, separator, value = parameter.partition('=')
+                if key.strip() == 'q':
+                    try:
+                        quality = float(value.strip()) if separator else 0.0
+                    except ValueError:
+                        quality = 0.0
+            if 0.0 < quality <= 1.0:
+                accepts_gzip = True
+        if accepts_gzip and len(body) >= 4096:
+            body = gzip.compress(body, mtime=0)
+            headers['Content-Encoding'] = 'gzip'
+        self._send(200, body, extra_headers=headers)
 
     def _redirect(self, location: str):
         """★U1-4 301 合并：旧页路由 → 新页（浏览器自动跳转，老链接/书签仍可用）"""
@@ -260,7 +287,7 @@ class Handler(SecurityMixin, BaseHTTPRequestHandler):
         code = urllib.parse.unquote(self.path.split('?', 1)[0][len(prefix):])
         adjust = (query.get('adjust') or ['none'])[0]
         revision = (query.get('revision') or [None])[0]
-        return self._send_json(service.stock_detail(code, adjust, revision or None))
+        return self._send_watchlist_detail(service.stock_detail(code, adjust, revision or None))
 
     def do_GET(self):
         if not self._gate():

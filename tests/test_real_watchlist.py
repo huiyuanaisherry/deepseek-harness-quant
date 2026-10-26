@@ -1,5 +1,6 @@
 """Read-only real watchlist tests built entirely from synthetic private snapshots."""
 import csv
+import gzip
 import hashlib
 import json
 import os
@@ -435,6 +436,50 @@ class HandlerTests(Fixture):
         connection.close()
         self.assertEqual(response.status, 200)
         self.cookie = cookie.split(';')[0]
+
+    def test_detail_gzip_negotiation_preserves_json_and_readonly_headers(self):
+        self.login()
+        payload = {'ok': True, 'bars': [{'close': 12.3, 'note': '合成行情'}] * 500}
+        expected = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        before = self.digest()
+        with patch.object(self.server.real_watchlist, 'stock_detail', return_value=payload):
+            for accept, compressed in (('gzip', True), ('br, gzip;q=0.5', True),
+                                       ('GZip; q=1.0', True), ('gzip;q=0', False),
+                                       ('br', False), ('*', False), ('gzip;q=invalid', False),
+                                       ('gzip;q=NaN', False), ('identity', False)):
+                with self.subTest(accept=accept):
+                    connection = HTTPConnection('127.0.0.1', self.port)
+                    connection.request('GET', '/api/real-watchlist/stocks/000001.SZ',
+                                       headers={'Cookie': self.cookie, 'Accept-Encoding': accept})
+                    response = connection.getresponse()
+                    body = response.read()
+                    self.assertEqual(response.status, 200)
+                    self.assertEqual(response.getheader('Content-Length'), str(len(body)))
+                    self.assertEqual(response.getheader('Cache-Control'), 'no-store')
+                    self.assertEqual(response.getheader('Vary'), 'Accept-Encoding')
+                    self.assertEqual(response.getheader('Content-Type'), 'application/json')
+                    if compressed:
+                        self.assertEqual(response.getheader('Content-Encoding'), 'gzip')
+                        self.assertEqual(gzip.decompress(body), expected)
+                        self.assertLess(len(body), len(expected))
+                    else:
+                        self.assertIsNone(response.getheader('Content-Encoding'))
+                        self.assertEqual(body, expected)
+                    connection.close()
+        self.assertEqual(before, self.digest())
+
+    def test_small_detail_stays_identity_even_when_gzip_accepted(self):
+        self.login()
+        with patch.object(self.server.real_watchlist, 'stock_detail', return_value={'ok': True}):
+            connection = HTTPConnection('127.0.0.1', self.port)
+            connection.request('GET', '/api/real-watchlist/stocks/000001.SZ',
+                               headers={'Cookie': self.cookie, 'Accept-Encoding': 'gzip'})
+            response = connection.getresponse()
+            body = response.read()
+            self.assertIsNone(response.getheader('Content-Encoding'))
+            self.assertEqual(json.loads(body), {'ok': True})
+            self.assertEqual(response.getheader('Vary'), 'Accept-Encoding')
+            connection.close()
 
     def test_watchlist_routes_require_login(self):
         self.assertEqual(self.request('/api/data-context')[0], 401)
