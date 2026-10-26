@@ -20,3 +20,17 @@
 发布前 Windows 基线 a7b6022，两项服务 active；已保存 50 个受保护文件的 SHA256 与 DSH PID 到服务端私有 /tmp 基线文件。完成后补记 Windows 测试、版本、哈希、服务与 HTTP/浏览器验证结果，不以本地通过替代生产验证。
 
 未执行全市场下载、生产数据切换、定时任务启用或交易。本轮程序发布不能消除尚未生成的数据，页面应明确显示这些阻塞。
+
+## Windows 实际发布结果
+
+- 功能提交 `99bdc2f` 已推送用户 fork，并通过 bundle 快进 Windows；仅重启 deepseek-quant.service，两项服务 active，DSH PID 23712 未变。
+- WSL 虚拟环境由 uv 管理，不含 pip；安装 pyarrow 26.0.0。第一次安装受继承的代理连接失败影响，仅在该安装子进程去掉代理变量后成功，未修改系统代理或供应商配置。
+- Windows Python unittest 179/179 通过、无跳过；使用 /home/jack/.local/opt/node22/bin/node 运行 Node 73/73 通过。
+- 管理会话 HTTP 验证：根页面、portal_dash、wufu_rotation、portal_status.js、real-watchlist 页面及列表 API 均 200。门户 mode=demo、数据日 2026-05-15；机会池等 missing、数量 null；brief=blocked、schedule=blocked；五福轮动 blocked/input_missing，已不报缺引擎。
+- 50 个受保护文件发布前后 SHA256 一致（私有模型/行情配置、演示数据和真实样本），服务端基线只留 /tmp 私有文件，不入 Git。
+- Mac 内置浏览器可达生产地址，刷新后到管理登录页；Chrome 扩展连接失败，未完成登录后的完整交互验收。HTTP 登录测试使用现有管理令牌仅在服务端进程内存中读取，未输出凭据。
+- 回滚入口：程序基线 a7b6022；若需回滚，先记录当前私有改动，以 git revert 对本轮程序提交生成回滚提交，或建立基线独立检出并沿原服务路径配置恢复。禁止 git reset --hard / git clean，禁止覆盖 harness/home/settings.yaml 等用户改动。已安装 pyarrow 可保留，不改变既有数据语义。
+
+## 后续工作
+
+真实数据与计算产物仍未接入门户，Task 4–7 未实施；保持演示库隔离。后续依据原方案先提交有界请求计划，再经授权采集、生成产物和切换。旧 live_endpoints / live_forward 其他调用方未全面改造，此次仅确保门户不自动调用这些有副作用的端点。
