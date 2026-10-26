@@ -3455,8 +3455,14 @@ def live_wufu_rotation() -> dict:
         _state, _reason = "blocked", "input_missing"
     except Exception as _e:
         out["error"] = str(_e)[:200]
-        _state = "blocked" if isinstance(_e, (KeyError, ValueError)) else "error"
-        _reason = "input_invalid" if _state == "blocked" else "compute_failed"
+        _st = getattr(_e, "state", None)
+        _rs = getattr(_e, "reason", None)
+        if _st in ("blocked", "error") and _rs:
+            # 五福轮动显式输入错误：透传 blocked/error 与原因码，不压成 input_invalid
+            _state, _reason = _st, str(_rs)
+        else:
+            _state = "blocked" if isinstance(_e, (KeyError, ValueError)) else "error"
+            _reason = "input_invalid" if _state == "blocked" else "compute_failed"
     # 弱市防守建议（global_rotation.json）
     try:
         _gr = _BASE / "output" / "global_rotation.json"

@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-10-26",
+  "note": "五福轮动 4 指数 + 9 ETF 代理池映射。support: verified=已按真实缓存核对；unverified=沿用旧代码/位置推断，未经实际文件核对；unsupported=供应商不支持，计算保持 blocked。alternative 仅为人工核对提示，代码不会自动用替代资产顶替原资产。",
+  "indices": [
+    {
+      "key": "hs300",
+      "name": "沪深300",
+      "column": "沪深300",
+      "column_index": 0,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "列名取自旧版 global_rotation.IDX_COLS；本机无 data/factorpool 缓存，未核对实际列名与供应商代码"
+    },
+    {
+      "key": "zzsmall",
+      "name": "中小综指",
+      "column": "中小综指",
+      "column_index": 1,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "列名取自旧版 IDX_COLS；未核对实际缓存列名"
+    },
+    {
+      "key": "cyb",
+      "name": "创业板指",
+      "column": "创业板指",
+      "column_index": 2,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "列名取自旧版 IDX_COLS；未核对实际缓存列名"
+    },
+    {
+      "key": "csi_a500",
+      "name": "中证A500",
+      "column": "中证A500",
+      "column_index": 3,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "列名取自旧版 IDX_COLS；未核对实际缓存列名"
+    }
+  ],
+  "etfs": [
+    {
+      "key": "etf_hs300",
+      "name": "沪深300ETF",
+      "column": null,
+      "column_index": 0,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "ETF 缓存列名为 GBK 乱码，按净值轨迹推断的位置映射；未经实际文件核对，Task 4 复核"
+    },
+    {
+      "key": "etf_gold",
+      "name": "黄金ETF",
+      "column": null,
+      "column_index": 1,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "位置推断（净值轨迹），未经实际文件核对"
+    },
+    {
+      "key": "etf_hsi",
+      "name": "恒指ETF",
+      "column": null,
+      "column_index": 2,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "位置推断（相关矩阵），未经实际文件核对"
+    },
+    {
+      "key": "etf_csi500",
+      "name": "中证500ETF",
+      "column": null,
+      "column_index": 3,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "位置推断（净值轨迹），未经实际文件核对"
+    },
+    {
+      "key": "etf_nikkei",
+      "name": "日经ETF",
+      "column": null,
+      "column_index": 4,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "位置推断（净值轨迹），未经实际文件核对"
+    },
+    {
+      "key": "etf_sp500",
+      "name": "标普500ETF",
+      "column": null,
+      "column_index": 5,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "位置推断（净值轨迹），未经实际文件核对"
+    },
+    {
+      "key": "etf_nasdaq",
+      "name": "纳指ETF",
+      "column": null,
+      "column_index": 6,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "位置推断（净值轨迹），未经实际文件核对"
+    },
+    {
+      "key": "etf_safe",
+      "name": "避险资产",
+      "column": null,
+      "column_index": 7,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "与全资产低相关，推断为债券/避险；具体品种未确认，不得自动用其它资产顶替"
+    },
+    {
+      "key": "etf_gold2",
+      "name": "黄金ETF2",
+      "column": null,
+      "column_index": 8,
+      "vendor": "factorpool-cache",
+      "vendor_symbol": "",
+      "support": "unverified",
+      "permission": "local_read_only",
+      "alternative": "",
+      "note": "疑似与黄金ETF 重复；若 Task 4 确认重复应显式停用，不得静默合并或替换"
+    }
+  ]
+}
